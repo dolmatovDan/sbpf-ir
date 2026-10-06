@@ -1,0 +1,10 @@
+[package]
+name = "sbpf-lift"
+description = "Лифтер sBPF-байткода Solana в IR"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+solana-sbpf.workspace = true

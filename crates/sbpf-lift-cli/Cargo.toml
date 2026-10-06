@@ -1,0 +1,14 @@
+[package]
+name = "sbpf-lift-cli"
+description = "CLI: .so -> IR.json, печать IR, экспорт CFG"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sbpf-lift"
+path = "src/main.rs"
+
+[dependencies]
+sbpf-lift.workspace = true

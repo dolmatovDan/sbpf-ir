@@ -1,0 +1,5 @@
+/target/
+/tests/programs/target/
+/tests/programs/out/
+*-keypair.json
+.DS_Store

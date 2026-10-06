@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["tests/programs"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+solana-sbpf = { version = "=0.25.0", default-features = false }
+sbpf-lift = { path = "crates/sbpf-lift" }

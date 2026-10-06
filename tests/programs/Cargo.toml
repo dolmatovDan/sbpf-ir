@@ -1,0 +1,18 @@
+# Тестовые контракты. Отдельный воркспейс: собирается через cargo build-sbf (см. build.sh).
+[workspace]
+resolver = "2"
+members = ["native-basic", "native-cpi", "anchor-basic"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+# Программы собираются под target_os = "solana", о котором хостовый rustc не знает.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

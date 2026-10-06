@@ -1,0 +1,4 @@
+# имя      адрес                                          тип
+p-token    TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA    pinocchio
+ata        ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL   native
+marinade   MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD    anchor
