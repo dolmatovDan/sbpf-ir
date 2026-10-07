@@ -4,7 +4,11 @@
 //! (`ebpf::hash_symbol_name`). Имя по хешу восстанавливается только через реестр
 //! загрузчика, поэтому все известные имена регистрируются в нём с функцией-заглушкой.
 
-use std::{ptr::NonNull, sync::Arc};
+use std::{
+    collections::HashMap,
+    ptr::NonNull,
+    sync::{Arc, LazyLock},
+};
 
 use solana_sbpf::{
     ebpf,
@@ -15,10 +19,8 @@ use solana_sbpf::{
 
 /// Имена syscall'ов, которые регистрирует валидатор.
 ///
-/// Источник: agave v4.3.0, `syscalls/src/lib.rs`, функция
-/// `create_program_runtime_environment`. Включены и syscall'ы за feature gate'ами:
-/// анализатор должен понимать любой контракт, независимо от того, какие фичи
-/// активны в конкретном кластере.
+/// Источник: agave v4.3.0, `syscalls/src/lib.rs`, `create_program_runtime_environment`,
+/// включая syscall'ы за feature gate'ами.
 pub const SYSCALLS: &[&str] = &[
     "abort",
     "sol_panic_",
@@ -67,10 +69,13 @@ pub const SYSCALLS: &[&str] = &[
 
 /// Имя syscall'а по хешу из `imm` инструкции `call`.
 pub fn syscall_name(hash: u32) -> Option<&'static str> {
-    SYSCALLS
-        .iter()
-        .copied()
-        .find(|name| ebpf::hash_symbol_name(name.as_bytes()) == hash)
+    static BY_HASH: LazyLock<HashMap<u32, &str>> = LazyLock::new(|| {
+        SYSCALLS
+            .iter()
+            .map(|&name| (ebpf::hash_symbol_name(name.as_bytes()), name))
+            .collect()
+    });
+    BY_HASH.get(&hash).copied()
 }
 
 /// Контекст-заглушка: программа не исполняется, только загружается и анализируется.
@@ -101,12 +106,12 @@ fn not_executable(
 
 fn no_codegen(_jit: &mut JitCompiler<NoExec>) {}
 
-/// Загрузчик с зарегистрированными [`SYSCALLS`], принимающий только sBPF v0 и v3.
-///
-/// v1 и v2 в этот диапазон попадают, их отсекает [`crate::Program::load`].
+/// В отличие от валидатора при деплое, `reject_broken_elfs` выключен: v0 с неизвестным
+/// syscall'ом загружается. Метки символов включены ради имён функций.
 pub(crate) fn loader() -> Arc<BuiltinProgram<NoExec>> {
     let config = Config {
         enabled_sbpf_versions: SBPFVersion::V0..=SBPFVersion::V3,
+        enable_symbol_and_section_labels: true,
         ..Config::default()
     };
     let mut loader = BuiltinProgram::new_loader(config);

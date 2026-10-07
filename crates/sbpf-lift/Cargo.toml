@@ -9,3 +9,4 @@ license.workspace = true
 [dependencies]
 solana-sbpf.workspace = true
 thiserror.workspace = true
+rustc-demangle = "0.1"

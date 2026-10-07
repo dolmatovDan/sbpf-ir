@@ -3,7 +3,8 @@
 use std::{fs, io, path::Path};
 
 use solana_sbpf::{
-    elf::{ElfError, Executable},
+    elf::{Executable, get_sbpf_version},
+    elf_parser::ElfParserError,
     error::EbpfError,
     program::SBPFVersion,
     verifier::RequisiteVerifier,
@@ -11,40 +12,32 @@ use solana_sbpf::{
 
 use crate::syscalls::{NoExec, loader};
 
-/// Ошибка загрузки программы.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error("не удалось прочитать файл: {0}")]
     Io(#[from] io::Error),
-    /// Поддерживаются только v0 (все контракты в мейннете) и v3 (новые деплои).
-    /// `None` — версия выше v3, загрузчик не сообщает какая.
-    #[error("неподдерживаемая версия sBPF: {}", match .0 { Some(v) => format!("{v:?}"), None => "выше V3".into() })]
-    UnsupportedVersion(Option<SBPFVersion>),
+    #[error("не ELF: {0}")]
+    Header(#[from] ElfParserError),
+    /// Поддерживаются только v0 (контракты в мейннете) и v3 (новые деплои).
+    #[error("неподдерживаемая версия sBPF: {0:?}")]
+    UnsupportedVersion(SBPFVersion),
     #[error("ошибка загрузки ELF: {0}")]
     Elf(EbpfError),
     #[error("программа не прошла верификацию: {0}")]
     Verifier(EbpfError),
 }
 
-/// Загруженная и проверенная программа.
 pub struct Program {
     executable: Executable<NoExec>,
 }
 
 impl Program {
-    /// Загружает программу так же, как валидатор при деплое: ELF и релокации
-    /// разбирает `solana-sbpf`, затем байткод проходит `RequisiteVerifier`.
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
-        let executable = Executable::from_elf(bytes, loader()).map_err(|e| match e {
-            EbpfError::ElfError(ElfError::UnsupportedSBPFVersion) => {
-                LoadError::UnsupportedVersion(None)
-            }
-            e => LoadError::Elf(e),
-        })?;
-        match executable.get_sbpf_version() {
+        match get_sbpf_version(bytes)? {
             SBPFVersion::V0 | SBPFVersion::V3 => {}
-            v => return Err(LoadError::UnsupportedVersion(Some(v))),
+            v => return Err(LoadError::UnsupportedVersion(v)),
         }
+        let executable = Executable::from_elf(bytes, loader()).map_err(LoadError::Elf)?;
         executable
             .verify::<RequisiteVerifier>()
             .map_err(LoadError::Verifier)?;
