@@ -174,13 +174,27 @@ fn dot_export() {
     }
 }
 
-/// Явные случаи из собранного `anchor-basic.v0`: `call` в pc 607 не возвращается
-/// (сразу за ним функция fn_608), `call` в pc 4 возвращается в lbb_5.
+/// После `call` есть возврат в следующий блок, если там не начинается другая функция
+/// (тогда вызов невозвращающийся, например panic).
 #[test]
 fn call_successors() {
     let cfg = build(&common::programs_dir().join("bin/anchor-basic.v0.so"));
-    let block = |start| cfg.blocks().find(|b| b.start == start).unwrap();
-    assert!(cfg.function_at(608).is_some());
-    assert_eq!(block(605).successors, Vec::<usize>::new());
-    assert_eq!(block(0).successors, [5]);
+    let blocks: Vec<_> = cfg.blocks().collect();
+    let (mut returning, mut noreturn) = (0, 0);
+    for pair in blocks.windows(2) {
+        let last = pair[0].instructions.last().unwrap();
+        if last.insn.opc != ebpf::CALL_IMM
+            || !matches!(last.call, Some(CallTarget::Internal { .. }))
+        {
+            continue;
+        }
+        if cfg.function_at(pair[1].start).is_some() {
+            assert!(pair[0].successors.is_empty(), "lbb_{}", pair[0].start);
+            noreturn += 1;
+        } else {
+            assert_eq!(pair[0].successors, [pair[1].start], "lbb_{}", pair[0].start);
+            returning += 1;
+        }
+    }
+    assert!(returning > 0 && noreturn > 0, "{returning} {noreturn}");
 }

@@ -94,17 +94,33 @@ fn v3_invalid_call() {
 #[test]
 fn v3_call_out_of_program() {
     let mut bytes = read("native-basic.v3.so");
-    let pos = (0..bytes.len() - 8)
-        .step_by(8)
-        .find(|&p| bytes[p] == ebpf::CALL_IMM && bytes[p + 1] == 1 << 4)
-        .expect("нет внутреннего call");
+    let program = Program::load(&bytes).unwrap();
+    let ptr = Cfg::build(&program)
+        .instructions()
+        .find(|i| matches!(i.call, Some(CallTarget::Internal { .. })))
+        .expect("нет внутреннего call")
+        .insn
+        .ptr;
+    let text = program.executable().get_text_bytes().1;
+    let insn = &text[ptr * ebpf::INSN_SIZE..(ptr + 1) * ebpf::INSN_SIZE];
+    let mut matches = (0..=bytes.len() - insn.len()).filter(|&p| &bytes[p..p + insn.len()] == insn);
+    let pos = matches.next().unwrap();
+    assert!(
+        matches.next().is_none(),
+        "инструкция встречается в файле не один раз"
+    );
     bytes[pos + 4..pos + 8].copy_from_slice(&0x0fff_ffffu32.to_le_bytes());
 
     let cfg = Cfg::build(&Program::load(&bytes).unwrap());
-    assert!(
-        cfg.instructions()
-            .any(|i| i.call == Some(CallTarget::Invalid))
-    );
+    let block = cfg
+        .blocks()
+        .find(|b| {
+            b.instructions
+                .iter()
+                .any(|i| i.call == Some(CallTarget::Invalid))
+        })
+        .expect("нет невалидного вызова");
+    assert!(block.successors.is_empty());
 }
 
 fn read(file: &str) -> Vec<u8> {
