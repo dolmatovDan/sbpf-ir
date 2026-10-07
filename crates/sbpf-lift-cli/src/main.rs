@@ -105,7 +105,8 @@ fn print_cfg(cfg: &Cfg, w: &mut impl Write) -> io::Result<()> {
                 }
             )?;
             for insn in block.instructions.iter().filter(|i| i.call.is_some()) {
-                writeln!(w, "    pc {}: {}", insn.insn.ptr, insn.text)?;
+                let mark = if block.noreturn { " (noreturn)" } else { "" };
+                writeln!(w, "    pc {}: {}{mark}", insn.insn.ptr, insn.text)?;
             }
         }
     }

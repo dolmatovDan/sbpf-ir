@@ -5,7 +5,7 @@ mod common;
 use std::{collections::BTreeSet, path::Path};
 
 use sbpf_lift::{
-    Block, CallTarget, Cfg, Program,
+    Block, CallTarget, Cfg, NORETURN_SYSCALLS, Program,
     solana_sbpf::{ebpf, program::SBPFVersion},
 };
 
@@ -37,6 +37,28 @@ fn has_exit(function: &sbpf_lift::Function) -> bool {
         .any(|i| i.insn.opc == ebpf::EXIT)
 }
 
+/// Необходимые условия для `noreturn`, независимые от неподвижной точки.
+fn check_noreturn(cfg: &Cfg, block: &Block, ctx: &str) {
+    match &block.instructions.last().unwrap().call {
+        Some(CallTarget::Syscall {
+            name: Some(name), ..
+        }) => {
+            assert_eq!(block.noreturn, NORETURN_SYSCALLS.contains(name), "{ctx}")
+        }
+        Some(CallTarget::Internal { pc }) => {
+            let callee = cfg.function_at(*pc).unwrap();
+            if !has_exit(callee) {
+                assert!(block.noreturn, "{ctx}: {} без exit", callee.name);
+            }
+            if !block.noreturn {
+                assert!(has_exit(callee), "{ctx}");
+            }
+        }
+        Some(CallTarget::Invalid) => assert!(block.noreturn, "{ctx}"),
+        _ => assert!(!block.noreturn, "{ctx}"),
+    }
+}
+
 /// Преемники блока согласованы с его последней инструкцией.
 fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
     let last = block.instructions.last().unwrap();
@@ -56,17 +78,11 @@ fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
             assert_eq!(succ, &expected, "{ctx}");
         }
         ebpf::CALL_IMM | ebpf::CALL_REG => {
-            let callee_returns = match &last.call {
-                Some(CallTarget::Internal { pc }) => has_exit(cfg.function_at(*pc).unwrap()),
-                Some(CallTarget::Syscall { name, .. }) => {
-                    !matches!(name, Some("abort" | "sol_panic_"))
-                }
-                Some(CallTarget::Indirect { .. }) => true,
-                Some(CallTarget::Invalid) | None => false,
-            };
-            let returns = callee_returns && next.is_some_and(|pc| cfg.function_at(pc).is_none());
+            let returns = last.call != Some(CallTarget::Invalid)
+                && next.is_some_and(|pc| cfg.function_at(pc).is_none());
             let expected: Vec<_> = next.filter(|_| returns).into_iter().collect();
             assert_eq!(succ, &expected, "{ctx}");
+            check_noreturn(cfg, block, &ctx);
         }
         _ => assert_eq!(succ, &next.into_iter().collect::<Vec<_>>(), "{ctx}"),
     }
@@ -190,21 +206,19 @@ fn dot_export() {
 }
 
 /// Встречаются все виды `call`: с возвратом, перед входом другой функции
-/// и невозвращающийся посреди функции.
+/// и невозвращающийся посреди функции (ребро возврата при этом сохранено).
 #[test]
-fn call_successors_kinds() {
+fn call_kinds() {
     let cfg = build(&common::programs_dir().join("bin/anchor-basic.v0.so"));
-    let blocks: Vec<_> = cfg.blocks().collect();
     let (mut returning, mut before_function, mut mid_function) = (0, 0, 0);
-    for pair in blocks.windows(2) {
-        let last = pair[0].instructions.last().unwrap();
-        if !matches!(last.call, Some(CallTarget::Internal { .. })) {
+    for block in cfg.blocks() {
+        if !matches!(
+            block.instructions.last().unwrap().call,
+            Some(CallTarget::Internal { .. })
+        ) {
             continue;
         }
-        match (
-            pair[0].successors.is_empty(),
-            cfg.function_at(pair[1].start).is_some(),
-        ) {
+        match (block.noreturn, block.successors.is_empty()) {
             (false, _) => returning += 1,
             (true, true) => before_function += 1,
             (true, false) => mid_function += 1,
@@ -214,4 +228,26 @@ fn call_successors_kinds() {
         returning > 0 && before_function > 0 && mid_function > 0,
         "{returning} {before_function} {mid_function}"
     );
+}
+
+/// Сверено по дизассемблеру: `custom_panic` в этих сборках кончается `sol_panic_`.
+#[test]
+fn custom_panic_is_noreturn() {
+    for file in ["anchor-basic.v0.so", "native-cpi.v0.so"] {
+        let cfg = build(&common::programs_dir().join("bin").join(file));
+        let entry = cfg
+            .functions
+            .iter()
+            .find(|f| f.name == "custom_panic")
+            .unwrap()
+            .entry;
+        let calls: Vec<_> = cfg
+            .blocks()
+            .filter(|b| {
+                b.instructions.last().unwrap().call == Some(CallTarget::Internal { pc: entry })
+            })
+            .collect();
+        assert!(!calls.is_empty(), "{file}");
+        assert!(calls.iter().all(|b| b.noreturn), "{file}");
+    }
 }

@@ -5,7 +5,7 @@ mod dot;
 mod load;
 mod syscalls;
 
-pub use cfg::{Block, CallTarget, Cfg, Function, Instruction};
+pub use cfg::{Block, CallTarget, Cfg, Function, Instruction, NORETURN_SYSCALLS};
 pub use dot::write_dot;
 pub use load::{LoadError, Program};
 pub use solana_sbpf;

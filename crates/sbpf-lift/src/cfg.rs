@@ -39,8 +39,13 @@ pub struct Block {
     pub start: usize,
     pub instructions: Vec<Instruction>,
     /// Переходы внутри функции; у `call` — возврат в следующий блок.
-    /// Пусто после `exit`, невозвращающегося или невалидного вызова.
+    /// Пусто после `exit`, невалидного вызова и вызова, за которым сразу начинается
+    /// другая функция. После невозвращающегося вызова ребро возврата остаётся.
     pub successors: Vec<usize>,
+    /// Блок кончается вызовом, который по анализу не возвращается: из функции
+    /// не достижим `exit`, либо это `abort`/`sol_panic_`. Эвристика опирается на
+    /// приблизительные границы функций, поэтому ребро возврата не удаляется.
+    pub noreturn: bool,
 }
 
 #[derive(Debug)]
@@ -188,9 +193,10 @@ impl Cfg {
                 start,
                 instructions: block,
                 successors,
+                noreturn: false,
             });
         }
-        cut_noreturn_edges(&mut functions);
+        mark_noreturn(&mut functions);
 
         Self {
             version,
@@ -258,32 +264,60 @@ fn ends_block(version: SBPFVersion, insn: &Insn) -> bool {
     is_jump(version, insn) || matches!(insn.opc, ebpf::EXIT | ebpf::CALL_IMM | ebpf::CALL_REG)
 }
 
-const NORETURN_SYSCALLS: [&str; 2] = ["abort", "sol_panic_"];
+pub const NORETURN_SYSCALLS: [&str; 2] = ["abort", "sol_panic_"];
 
-/// Убирает возврат после вызова функции без `exit` и после `abort`/`sol_panic_`.
-fn cut_noreturn_edges(functions: &mut [Function]) {
-    let noreturn: BTreeSet<usize> = functions
-        .iter()
-        .filter(|f| {
-            f.blocks
-                .iter()
-                .flat_map(|b| &b.instructions)
-                .all(|i| i.insn.opc != ebpf::EXIT)
-        })
-        .map(|f| f.entry)
-        .collect();
-    for block in functions.iter_mut().flat_map(|f| &mut f.blocks) {
-        let cut = match &block.instructions.last().unwrap().call {
-            Some(CallTarget::Internal { pc }) => noreturn.contains(pc),
-            Some(CallTarget::Syscall {
-                name: Some(name), ..
-            }) => NORETURN_SYSCALLS.contains(name),
-            _ => false,
-        };
-        if cut {
-            block.successors.clear();
+fn call_returns(call: &Option<CallTarget>, returning: &BTreeSet<usize>) -> bool {
+    match call {
+        Some(CallTarget::Internal { pc }) => returning.contains(pc),
+        Some(CallTarget::Syscall {
+            name: Some(name), ..
+        }) => !NORETURN_SYSCALLS.contains(name),
+        Some(CallTarget::Invalid) => false,
+        _ => true,
+    }
+}
+
+/// Функция возвращается, если от входа достижим `exit`, причём через вызов можно
+/// пройти, только если он сам возвращается. Наименьшая неподвижная точка.
+fn mark_noreturn(functions: &mut [Function]) {
+    let mut returning = BTreeSet::new();
+    loop {
+        let before = returning.len();
+        for function in functions.iter() {
+            if !returning.contains(&function.entry) && reaches_exit(function, &returning) {
+                returning.insert(function.entry);
+            }
+        }
+        if returning.len() == before {
+            break;
         }
     }
+    for block in functions.iter_mut().flat_map(|f| &mut f.blocks) {
+        let last = block.instructions.last().unwrap();
+        block.noreturn = last.call.is_some() && !call_returns(&last.call, &returning);
+    }
+}
+
+fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
+    let index: BTreeMap<usize, &Block> = function.blocks.iter().map(|b| (b.start, b)).collect();
+    let mut seen = BTreeSet::from([function.entry]);
+    let mut stack = vec![function.entry];
+    while let Some(start) = stack.pop() {
+        let block = index[&start];
+        let last = block.instructions.last().unwrap();
+        if last.insn.opc == ebpf::EXIT {
+            return true;
+        }
+        if !call_returns(&last.call, returning) {
+            continue;
+        }
+        for &succ in &block.successors {
+            if seen.insert(succ) {
+                stack.push(succ);
+            }
+        }
+    }
+    false
 }
 
 fn successors(
