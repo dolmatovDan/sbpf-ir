@@ -56,6 +56,16 @@ pub struct Instruction {
     pub call: Option<CallTarget>,
 }
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FindFunctionError {
+    #[error("нет функции с входом в pc {0}")]
+    NoEntryAt(usize),
+    #[error("нет функции {0}")]
+    NotFound(String),
+    #[error("несколько функций {0}, укажите pc: {1:?}")]
+    Ambiguous(String, Vec<usize>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallTarget {
     Internal {
@@ -209,23 +219,17 @@ impl Cfg {
     }
 
     /// Функция по имени или по pc входа.
-    pub fn find_function(&self, query: &str) -> Result<&Function, String> {
+    pub fn find_function(&self, query: &str) -> Result<&Function, FindFunctionError> {
         if let Ok(pc) = query.parse() {
-            return self
-                .function_at(pc)
-                .ok_or_else(|| format!("нет функции с входом в pc {pc}"));
+            return self.function_at(pc).ok_or(FindFunctionError::NoEntryAt(pc));
         }
         let found: Vec<_> = self.functions.iter().filter(|f| f.name == query).collect();
         match found.as_slice() {
             [f] => Ok(f),
-            [] => Err(format!("нет функции {query}")),
-            _ => Err(format!(
-                "несколько функций {query}, укажите pc: {}",
-                found
-                    .iter()
-                    .map(|f| f.entry.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            [] => Err(FindFunctionError::NotFound(query.to_string())),
+            _ => Err(FindFunctionError::Ambiguous(
+                query.to_string(),
+                found.iter().map(|f| f.entry).collect(),
             )),
         }
     }

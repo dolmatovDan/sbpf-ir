@@ -5,7 +5,7 @@ mod common;
 use std::{collections::BTreeSet, path::Path};
 
 use sbpf_lift::{
-    Block, CallTarget, Cfg, NORETURN_SYSCALLS, Program,
+    Block, CallTarget, Cfg, FindFunctionError, NORETURN_SYSCALLS, Program,
     solana_sbpf::{ebpf, program::SBPFVersion},
 };
 
@@ -307,13 +307,22 @@ fn find_function() {
         cfg.find_function(&entry.to_string()).unwrap().name,
         "entrypoint"
     );
-    assert!(cfg.find_function("no_such_function").is_err());
-    assert!(cfg.find_function(&(entry + 1).to_string()).is_err());
+    assert_eq!(
+        cfg.find_function("no_such_function").unwrap_err(),
+        FindFunctionError::NotFound("no_such_function".into())
+    );
+    assert_eq!(
+        cfg.find_function(&(entry + 1).to_string()).unwrap_err(),
+        FindFunctionError::NoEntryAt(entry + 1)
+    );
 
     cfg.functions[0].name = "dup".into();
     cfg.functions[1].name = "dup".into();
-    let err = cfg.find_function("dup").unwrap_err();
-    assert!(err.contains("несколько"), "{err}");
+    let (a, b) = (cfg.functions[0].entry, cfg.functions[1].entry);
+    assert_eq!(
+        cfg.find_function("dup").unwrap_err(),
+        FindFunctionError::Ambiguous("dup".into(), vec![a, b])
+    );
 }
 
 /// В DOT одной функции нет рёбер вызовов к функциям вне вывода.
