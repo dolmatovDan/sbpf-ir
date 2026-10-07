@@ -11,6 +11,12 @@ pub fn write_dot<'a>(
 ) -> io::Result<()> {
     let functions: Vec<_> = functions.into_iter().collect();
     let entries: BTreeSet<_> = functions.iter().map(|f| f.entry).collect();
+    let blocks: BTreeSet<_> = functions
+        .iter()
+        .flat_map(|f| &f.blocks)
+        .map(|b| b.start)
+        .collect();
+    let mut external = BTreeSet::new();
     writeln!(w, "digraph cfg {{")?;
     writeln!(w, "  node [shape=plaintext, fontname=\"Courier New\"];")?;
     writeln!(w, "  compound=true;")?;
@@ -44,9 +50,16 @@ pub fn write_dot<'a>(
                 ""
             };
             for succ in &block.successors {
+                if !blocks.contains(succ) {
+                    external.insert(*succ);
+                }
                 writeln!(w, "  lbb_{} -> lbb_{succ}{style};", block.start)?;
             }
         }
+    }
+    // Переходы в функции, не попавшие в вывод.
+    for pc in external {
+        writeln!(w, "  lbb_{pc} [label=\"→ lbb_{pc}\", shape=note];")?;
     }
     for (from, to) in calls {
         writeln!(

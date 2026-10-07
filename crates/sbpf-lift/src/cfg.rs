@@ -104,7 +104,10 @@ impl Cfg {
             if !name.is_empty() && name != format!("function_{pc}").as_bytes() {
                 names.insert(
                     pc,
-                    rustc_demangle::demangle(&String::from_utf8_lossy(name)).to_string(),
+                    format!(
+                        "{:#}",
+                        rustc_demangle::demangle(&String::from_utf8_lossy(name))
+                    ),
                 );
             }
         }
@@ -202,6 +205,28 @@ impl Cfg {
             version,
             entrypoint,
             functions,
+        }
+    }
+
+    /// Функция по имени или по pc входа.
+    pub fn find_function(&self, query: &str) -> Result<&Function, String> {
+        if let Ok(pc) = query.parse() {
+            return self
+                .function_at(pc)
+                .ok_or_else(|| format!("нет функции с входом в pc {pc}"));
+        }
+        let found: Vec<_> = self.functions.iter().filter(|f| f.name == query).collect();
+        match found.as_slice() {
+            [f] => Ok(f),
+            [] => Err(format!("нет функции {query}")),
+            _ => Err(format!(
+                "несколько функций {query}, укажите pc: {}",
+                found
+                    .iter()
+                    .map(|f| f.entry.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
         }
     }
 

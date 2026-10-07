@@ -287,4 +287,50 @@ fn jump_into_other_function() {
         .find(|b| b.instructions.last().unwrap().insn.ptr == ptr)
         .unwrap();
     assert_eq!(block.successors, [entry]);
+
+    // В DOT одной функции цель перехода — отдельный узел-заглушка.
+    let own = cfg.functions.iter().rfind(|f| f.entry <= ptr).unwrap();
+    let mut out = Vec::new();
+    sbpf_lift::write_dot([own], &mut out).unwrap();
+    let dot = String::from_utf8(out).unwrap();
+    assert!(dot.contains(&format!(
+        "lbb_{entry} [label=\"→ lbb_{entry}\", shape=note]"
+    )));
+}
+
+#[test]
+fn find_function() {
+    let mut cfg = build(&common::programs_dir().join("bin/native-cpi.v0.so"));
+    let entry = cfg.find_function("entrypoint").unwrap().entry;
+    assert_eq!(entry, cfg.entrypoint);
+    assert_eq!(
+        cfg.find_function(&entry.to_string()).unwrap().name,
+        "entrypoint"
+    );
+    assert!(cfg.find_function("no_such_function").is_err());
+    assert!(cfg.find_function(&(entry + 1).to_string()).is_err());
+
+    cfg.functions[0].name = "dup".into();
+    cfg.functions[1].name = "dup".into();
+    let err = cfg.find_function("dup").unwrap_err();
+    assert!(err.contains("несколько"), "{err}");
+}
+
+/// В DOT одной функции нет рёбер вызовов к функциям вне вывода.
+#[test]
+fn dot_single_function() {
+    let cfg = build(&common::programs_dir().join("bin/native-cpi.v0.so"));
+    let function = cfg.find_function("entrypoint").unwrap();
+    assert!(
+        function
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .any(|i| matches!(i.call, Some(CallTarget::Internal { .. })))
+    );
+    let mut out = Vec::new();
+    sbpf_lift::write_dot([function], &mut out).unwrap();
+    let dot = String::from_utf8(out).unwrap();
+    assert_eq!(dot.matches("subgraph cluster_").count(), 1);
+    assert!(!dot.contains("color=gray"));
 }

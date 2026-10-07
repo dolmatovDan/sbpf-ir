@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     }
     let functions: Vec<&Function> = match &function {
         None => cfg.functions.iter().collect(),
-        Some(query) => match find_function(&cfg, query) {
+        Some(query) => match cfg.find_function(query) {
             Ok(f) => vec![f],
             Err(e) => {
                 eprintln!("{e}");
@@ -89,34 +89,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn find_function<'a>(cfg: &'a Cfg, query: &str) -> Result<&'a Function, String> {
-    if let Ok(pc) = query.parse() {
-        return cfg
-            .function_at(pc)
-            .ok_or_else(|| format!("нет функции с входом в pc {pc}"));
-    }
-    let found: Vec<_> = cfg.functions.iter().filter(|f| f.name == query).collect();
-    match found.as_slice() {
-        [f] => Ok(f),
-        [] => Err(format!("нет функции {query}")),
-        _ => Err(format!(
-            "несколько функций {query}, укажите pc: {}",
-            found
-                .iter()
-                .map(|f| f.entry.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
-}
-
 fn print_cfg(cfg: &Cfg, functions: &[&Function], w: &mut impl Write) -> io::Result<()> {
     let entry = cfg
         .function_at(cfg.entrypoint)
         .map_or("?", |f| f.name.as_str());
     writeln!(
         w,
-        "sBPF {:?}, функций: {}, блоков: {}, точка входа: {entry} (pc {})",
+        "sBPF {:?}, всего в программе функций: {}, блоков: {}, точка входа: {entry} (pc {})",
         cfg.version,
         cfg.functions.len(),
         cfg.blocks().count(),
