@@ -83,6 +83,7 @@ name = "sbpf-lift"
 version = "0.1.0"
 dependencies = [
  "solana-sbpf",
+ "thiserror",
 ]
 
 [[package]]

@@ -12,3 +12,5 @@ license = "Apache-2.0"
 [workspace.dependencies]
 solana-sbpf = { version = "=0.25.0", default-features = false }
 sbpf-lift = { path = "crates/sbpf-lift" }
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
