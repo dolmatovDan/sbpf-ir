@@ -185,7 +185,7 @@ fn dot_export() {
             .lines()
             .filter(|l| l.starts_with("  lbb_") && l.contains(" -> lbb_"))
             .collect();
-        let calls = edges.iter().filter(|l| l.contains("style=dashed")).count();
+        let calls = edges.iter().filter(|l| l.contains("color=gray")).count();
         let call_pairs: BTreeSet<_> = cfg
             .blocks()
             .flat_map(|b| {
@@ -250,4 +250,41 @@ fn custom_panic_is_noreturn() {
         assert!(!calls.is_empty(), "{file}");
         assert!(calls.iter().all(|b| b.noreturn), "{file}");
     }
+}
+
+/// Переход в другую функцию (хвостовой переход, .cold-часть) не роняет построение CFG.
+#[test]
+fn jump_into_other_function() {
+    let path = common::programs_dir().join("bin/native-basic.v3.so");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let program = Program::load(&bytes).unwrap();
+    let cfg = Cfg::build(&program);
+    let text = program.executable().get_text_bytes().1;
+    let unique_pos = |ptr: usize| {
+        let insn = &text[ptr * ebpf::INSN_SIZE..(ptr + 1) * ebpf::INSN_SIZE];
+        let mut found = (0..=bytes.len() - 8).filter(|&p| &bytes[p..p + 8] == insn);
+        let pos = found.next()?;
+        found.next().is_none().then_some(pos)
+    };
+    let (ptr, entry, pos) =
+        cfg.instructions()
+            .filter(|i| i.insn.opc == ebpf::JA)
+            .find_map(|i| {
+                let ptr = i.insn.ptr;
+                let own = cfg.functions.iter().rfind(|f| f.entry <= ptr)?.entry;
+                let entry = cfg.functions.iter().map(|f| f.entry).find(|&e| {
+                    e != own && (e as isize - ptr as isize - 1).abs() < i16::MAX as isize
+                })?;
+                Some((ptr, entry, unique_pos(ptr)?))
+            })
+            .expect("нет подходящего ja");
+    let off = (entry as isize - ptr as isize - 1) as i16;
+    bytes[pos + 2..pos + 4].copy_from_slice(&off.to_le_bytes());
+
+    let cfg = Cfg::build(&Program::load(&bytes).unwrap());
+    let block = cfg
+        .blocks()
+        .find(|b| b.instructions.last().unwrap().insn.ptr == ptr)
+        .unwrap();
+    assert_eq!(block.successors, [entry]);
 }

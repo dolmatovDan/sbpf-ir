@@ -303,7 +303,10 @@ fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
     let mut seen = BTreeSet::from([function.entry]);
     let mut stack = vec![function.entry];
     while let Some(start) = stack.pop() {
-        let block = index[&start];
+        // Переход в другую функцию: исход неизвестен, считаем, что возврат есть.
+        let Some(block) = index.get(&start) else {
+            return true;
+        };
         let last = block.instructions.last().unwrap();
         if last.insn.opc == ebpf::EXIT {
             return true;

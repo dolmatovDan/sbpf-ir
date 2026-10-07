@@ -30,8 +30,14 @@ pub fn write_dot(cfg: &Cfg, w: &mut impl io::Write) -> io::Result<()> {
         }
         writeln!(w, "  }}")?;
         for block in &function.blocks {
+            // У noreturn-блока единственное ребро — возврат, который по анализу невозможен.
+            let style = if block.noreturn {
+                " [style=dashed, color=red]"
+            } else {
+                ""
+            };
             for succ in &block.successors {
-                writeln!(w, "  lbb_{} -> lbb_{succ};", block.start)?;
+                writeln!(w, "  lbb_{} -> lbb_{succ}{style};", block.start)?;
             }
         }
     }
