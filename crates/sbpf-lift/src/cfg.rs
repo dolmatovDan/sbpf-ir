@@ -190,6 +190,7 @@ impl Cfg {
                 successors,
             });
         }
+        cut_noreturn_edges(&mut functions);
 
         Self {
             version,
@@ -255,6 +256,34 @@ fn jump_target(version: SBPFVersion, insn: &Insn) -> Option<usize> {
 
 fn ends_block(version: SBPFVersion, insn: &Insn) -> bool {
     is_jump(version, insn) || matches!(insn.opc, ebpf::EXIT | ebpf::CALL_IMM | ebpf::CALL_REG)
+}
+
+const NORETURN_SYSCALLS: [&str; 2] = ["abort", "sol_panic_"];
+
+/// Убирает возврат после вызова функции без `exit` и после `abort`/`sol_panic_`.
+fn cut_noreturn_edges(functions: &mut [Function]) {
+    let noreturn: BTreeSet<usize> = functions
+        .iter()
+        .filter(|f| {
+            f.blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .all(|i| i.insn.opc != ebpf::EXIT)
+        })
+        .map(|f| f.entry)
+        .collect();
+    for block in functions.iter_mut().flat_map(|f| &mut f.blocks) {
+        let cut = match &block.instructions.last().unwrap().call {
+            Some(CallTarget::Internal { pc }) => noreturn.contains(pc),
+            Some(CallTarget::Syscall {
+                name: Some(name), ..
+            }) => NORETURN_SYSCALLS.contains(name),
+            _ => false,
+        };
+        if cut {
+            block.successors.clear();
+        }
+    }
 }
 
 fn successors(

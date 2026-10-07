@@ -29,6 +29,14 @@ fn is_jump(version: SBPFVersion, opc: u8) -> bool {
     }
 }
 
+fn has_exit(function: &sbpf_lift::Function) -> bool {
+    function
+        .blocks
+        .iter()
+        .flat_map(|b| &b.instructions)
+        .any(|i| i.insn.opc == ebpf::EXIT)
+}
+
 /// Преемники блока согласованы с его последней инструкцией.
 fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
     let last = block.instructions.last().unwrap();
@@ -48,8 +56,15 @@ fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
             assert_eq!(succ, &expected, "{ctx}");
         }
         ebpf::CALL_IMM | ebpf::CALL_REG => {
-            let returns = last.call != Some(CallTarget::Invalid)
-                && next.is_some_and(|pc| cfg.function_at(pc).is_none());
+            let callee_returns = match &last.call {
+                Some(CallTarget::Internal { pc }) => has_exit(cfg.function_at(*pc).unwrap()),
+                Some(CallTarget::Syscall { name, .. }) => {
+                    !matches!(name, Some("abort" | "sol_panic_"))
+                }
+                Some(CallTarget::Indirect { .. }) => true,
+                Some(CallTarget::Invalid) | None => false,
+            };
+            let returns = callee_returns && next.is_some_and(|pc| cfg.function_at(pc).is_none());
             let expected: Vec<_> = next.filter(|_| returns).into_iter().collect();
             assert_eq!(succ, &expected, "{ctx}");
         }
@@ -174,42 +189,29 @@ fn dot_export() {
     }
 }
 
-/// После `call` есть возврат в следующий блок, если там не начинается другая функция
-/// (тогда вызов невозвращающийся, например panic).
+/// Встречаются все виды `call`: с возвратом, перед входом другой функции
+/// и невозвращающийся посреди функции.
 #[test]
-fn call_successors() {
+fn call_successors_kinds() {
     let cfg = build(&common::programs_dir().join("bin/anchor-basic.v0.so"));
     let blocks: Vec<_> = cfg.blocks().collect();
-    let (mut returning, mut noreturn) = (0, 0);
+    let (mut returning, mut before_function, mut mid_function) = (0, 0, 0);
     for pair in blocks.windows(2) {
         let last = pair[0].instructions.last().unwrap();
-        if last.insn.opc != ebpf::CALL_IMM
-            || !matches!(last.call, Some(CallTarget::Internal { .. }))
-        {
+        if !matches!(last.call, Some(CallTarget::Internal { .. })) {
             continue;
         }
-        if cfg.function_at(pair[1].start).is_some() {
-            assert!(pair[0].successors.is_empty(), "lbb_{}", pair[0].start);
-            // Независимая проверка: невозвращающаяся функция не содержит `exit`.
-            let Some(CallTarget::Internal { pc }) = last.call else {
-                unreachable!()
-            };
-            let callee = cfg.function_at(pc).unwrap();
-            assert!(
-                callee
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.instructions)
-                    .all(|i| i.insn.opc != ebpf::EXIT),
-                "lbb_{}: {} возвращается",
-                pair[0].start,
-                callee.name
-            );
-            noreturn += 1;
-        } else {
-            assert_eq!(pair[0].successors, [pair[1].start], "lbb_{}", pair[0].start);
-            returning += 1;
+        match (
+            pair[0].successors.is_empty(),
+            cfg.function_at(pair[1].start).is_some(),
+        ) {
+            (false, _) => returning += 1,
+            (true, true) => before_function += 1,
+            (true, false) => mid_function += 1,
         }
     }
-    assert!(returning > 0 && noreturn > 0, "{returning} {noreturn}");
+    assert!(
+        returning > 0 && before_function > 0 && mid_function > 0,
+        "{returning} {before_function} {mid_function}"
+    );
 }
