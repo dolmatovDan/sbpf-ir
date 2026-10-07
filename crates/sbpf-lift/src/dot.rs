@@ -1,16 +1,21 @@
 //! Экспорт CFG в Graphviz DOT: кластер на функцию, сплошные рёбра — переходы,
-//! пунктирные — вызовы.
+//! пунктирные — вызовы (только к функциям, попавшим в вывод).
 
 use std::{collections::BTreeSet, io};
 
-use crate::{CallTarget, Cfg};
+use crate::{CallTarget, Function};
 
-pub fn write_dot(cfg: &Cfg, w: &mut impl io::Write) -> io::Result<()> {
+pub fn write_dot<'a>(
+    functions: impl IntoIterator<Item = &'a Function>,
+    w: &mut impl io::Write,
+) -> io::Result<()> {
+    let functions: Vec<_> = functions.into_iter().collect();
+    let entries: BTreeSet<_> = functions.iter().map(|f| f.entry).collect();
     writeln!(w, "digraph cfg {{")?;
     writeln!(w, "  node [shape=plaintext, fontname=\"Courier New\"];")?;
     writeln!(w, "  compound=true;")?;
     let mut calls = BTreeSet::new();
-    for function in &cfg.functions {
+    for function in functions {
         writeln!(w, "  subgraph cluster_{} {{", function.entry)?;
         writeln!(w, "    label=<{}>;", escape(&function.name))?;
         for block in &function.blocks {
@@ -22,7 +27,9 @@ pub fn write_dot(cfg: &Cfg, w: &mut impl io::Write) -> io::Result<()> {
             )?;
             for insn in &block.instructions {
                 write!(w, "<tr><td align=\"left\">{}</td></tr>", escape(&insn.text))?;
-                if let Some(CallTarget::Internal { pc }) = insn.call {
+                if let Some(CallTarget::Internal { pc }) = insn.call
+                    && entries.contains(&pc)
+                {
                     calls.insert((block.start, pc));
                 }
             }

@@ -173,7 +173,7 @@ fn dot_export() {
     for version in ["v0", "v3"] {
         let cfg = build(&common::programs_dir().join(format!("bin/native-cpi.{version}.so")));
         let mut out = Vec::new();
-        sbpf_lift::write_dot(&cfg, &mut out).unwrap();
+        sbpf_lift::write_dot(&cfg.functions, &mut out).unwrap();
         let dot = String::from_utf8(out).unwrap();
 
         assert!(dot.starts_with("digraph cfg {") && dot.trim_end().ends_with('}'));

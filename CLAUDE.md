@@ -42,6 +42,7 @@ cargo clippy --all-targets
 cargo fmt
 cargo run -p sbpf-lift-cli -- cfg <file.so>       # функции, блоки, переходы
 cargo run -p sbpf-lift-cli -- cfg <file.so> --dot # то же в Graphviz DOT
+cargo run -p sbpf-lift-cli -- cfg <file.so> -f entrypoint --dot | dot -Tsvg > f.svg  # одна функция (имя или pc)
 
 tests/programs/build.sh [программа ...]           # пересобрать тестовые контракты под v0 и v3
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
