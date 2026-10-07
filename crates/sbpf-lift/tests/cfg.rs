@@ -40,8 +40,9 @@ fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
         ebpf::EXIT => assert!(succ.is_empty(), "{ctx}"),
         ebpf::JA => assert_eq!(succ, &[target], "{ctx}"),
         opc if is_jump(cfg.version, opc) => {
-            let mut expected = vec![next.unwrap()];
-            if target != next.unwrap() {
+            let next = next.unwrap_or_else(|| panic!("{ctx}: условный переход в конце программы"));
+            let mut expected = vec![next];
+            if target != next {
                 expected.push(target);
             }
             assert_eq!(succ, &expected, "{ctx}");
@@ -171,4 +172,15 @@ fn dot_export() {
         );
         assert!(dot.contains("syscall sol_invoke_signed_rust"), "{version}");
     }
+}
+
+/// Явные случаи из собранного `anchor-basic.v0`: `call` в pc 607 не возвращается
+/// (сразу за ним функция fn_608), `call` в pc 4 возвращается в lbb_5.
+#[test]
+fn call_successors() {
+    let cfg = build(&common::programs_dir().join("bin/anchor-basic.v0.so"));
+    let block = |start| cfg.blocks().find(|b| b.start == start).unwrap();
+    assert!(cfg.function_at(608).is_some());
+    assert_eq!(block(605).successors, Vec::<usize>::new());
+    assert_eq!(block(0).successors, [5]);
 }

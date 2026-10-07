@@ -66,8 +66,8 @@ pub enum CallTarget {
     Indirect {
         reg: u8,
     },
-    /// v3: `src` не 0 и не 1 или цель не начало инструкции. Интерпретатор
-    /// завершает программу ошибкой `UnsupportedInstruction`.
+    /// Цель не начало инструкции, либо в v3 `src` не 0 и не 1. Интерпретатор
+    /// завершает программу ошибкой.
     Invalid,
 }
 
@@ -96,7 +96,7 @@ impl Cfg {
         let mut names: BTreeMap<usize, String> = BTreeMap::new();
         for (_, (name, pc)) in registry.iter() {
             // `function_<pc>` загрузчик придумывает сам для целей call в v0.
-            if !name.is_empty() && !name.starts_with(b"function_") {
+            if !name.is_empty() && name != format!("function_{pc}").as_bytes() {
                 names.insert(
                     pc,
                     rustc_demangle::demangle(&String::from_utf8_lossy(name)).to_string(),

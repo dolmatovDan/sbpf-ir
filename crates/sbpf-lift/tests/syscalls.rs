@@ -90,6 +90,23 @@ fn v3_invalid_call() {
     assert!(block.successors.is_empty());
 }
 
+/// v3: `call` (src=1) с целью за пределами программы.
+#[test]
+fn v3_call_out_of_program() {
+    let mut bytes = read("native-basic.v3.so");
+    let pos = (0..bytes.len() - 8)
+        .step_by(8)
+        .find(|&p| bytes[p] == ebpf::CALL_IMM && bytes[p + 1] == 1 << 4)
+        .expect("нет внутреннего call");
+    bytes[pos + 4..pos + 8].copy_from_slice(&0x0fff_ffffu32.to_le_bytes());
+
+    let cfg = Cfg::build(&Program::load(&bytes).unwrap());
+    assert!(
+        cfg.instructions()
+            .any(|i| i.call == Some(CallTarget::Invalid))
+    );
+}
+
 fn read(file: &str) -> Vec<u8> {
     std::fs::read(common::programs_dir().join("bin").join(file)).unwrap()
 }
