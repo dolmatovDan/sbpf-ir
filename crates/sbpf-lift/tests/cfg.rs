@@ -190,6 +190,21 @@ fn call_successors() {
         }
         if cfg.function_at(pair[1].start).is_some() {
             assert!(pair[0].successors.is_empty(), "lbb_{}", pair[0].start);
+            // Независимая проверка: невозвращающаяся функция не содержит `exit`.
+            let Some(CallTarget::Internal { pc }) = last.call else {
+                unreachable!()
+            };
+            let callee = cfg.function_at(pc).unwrap();
+            assert!(
+                callee
+                    .blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .all(|i| i.insn.opc != ebpf::EXIT),
+                "lbb_{}: {} возвращается",
+                pair[0].start,
+                callee.name
+            );
             noreturn += 1;
         } else {
             assert_eq!(pair[0].successors, [pair[1].start], "lbb_{}", pair[0].start);
