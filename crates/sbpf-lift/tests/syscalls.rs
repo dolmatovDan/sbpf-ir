@@ -57,13 +57,37 @@ fn mainnet_programs_syscalls() {
 
 #[test]
 fn disassembler_shows_syscall_names() {
-    let path = common::programs_dir().join("bin/native-cpi.v0.so");
-    let cfg = Cfg::build(&Program::load_file(path).unwrap());
-    assert!(
-        cfg.instructions()
-            .any(|i| i.text == "syscall sol_invoke_signed_rust"),
-        "дизассемблер не показывает имя syscall'а"
-    );
+    for version in ["v0", "v3"] {
+        let path = common::programs_dir().join(format!("bin/native-cpi.{version}.so"));
+        let cfg = Cfg::build(&Program::load_file(path).unwrap());
+        assert!(
+            cfg.instructions()
+                .any(|i| i.text == "syscall sol_invoke_signed_rust"),
+            "{version}: дизассемблер не показывает имя syscall'а"
+        );
+    }
+}
+
+/// v3: `call` с `src` не 0/1 интерпретатор не исполняет.
+#[test]
+fn v3_invalid_call() {
+    let mut call = [ebpf::CALL_IMM, 0, 0, 0, 0, 0, 0, 0];
+    call[4..].copy_from_slice(&ebpf::hash_symbol_name(b"sol_log_").to_le_bytes());
+    let mut patched = call;
+    patched[1] = 2 << 4;
+    let mut bytes = read("native-basic.v3.so");
+    replace(&mut bytes, &call, &patched);
+
+    let cfg = Cfg::build(&Program::load(&bytes).unwrap());
+    let block = cfg
+        .blocks()
+        .find(|b| {
+            b.instructions
+                .iter()
+                .any(|i| i.call == Some(CallTarget::Invalid))
+        })
+        .expect("нет невалидного вызова");
+    assert!(block.successors.is_empty());
 }
 
 fn read(file: &str) -> Vec<u8> {

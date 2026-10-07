@@ -18,27 +18,35 @@ use solana_sbpf::{
 
 use crate::{Program, syscall_name};
 
+#[derive(Debug)]
 pub struct Cfg {
     pub version: SBPFVersion,
     pub entrypoint: usize,
+    /// В порядке адресов; блоки функции идут подряд от её входа до входа следующей.
     pub functions: Vec<Function>,
 }
 
+#[derive(Debug)]
 pub struct Function {
     pub entry: usize,
+    /// Имя символа (demangled) или `fn_<pc>`.
     pub name: String,
     pub blocks: Vec<Block>,
 }
 
+#[derive(Debug)]
 pub struct Block {
     pub start: usize,
     pub instructions: Vec<Instruction>,
     /// Переходы внутри функции; у `call` — возврат в следующий блок.
+    /// Пусто после `exit`, невозвращающегося или невалидного вызова.
     pub successors: Vec<usize>,
 }
 
+#[derive(Debug)]
 pub struct Instruction {
     pub insn: Insn,
+    /// Текст дизассемблера с именами syscall'ов и функций.
     pub text: String,
     pub call: Option<CallTarget>,
 }
@@ -48,7 +56,9 @@ pub enum CallTarget {
     Internal {
         pc: usize,
     },
-    /// `name == None` — хеша нет в [`crate::SYSCALLS`].
+    /// `name == None` — хеша нет в [`crate::SYSCALLS`]. В v0 сюда же попадает `call`,
+    /// не найденный в registry программы: отличить его от нового syscall'а нельзя,
+    /// в рантайме оба дают ошибку исполнения, если syscall неизвестен валидатору.
     Syscall {
         hash: u32,
         name: Option<&'static str>,
@@ -56,6 +66,9 @@ pub enum CallTarget {
     Indirect {
         reg: u8,
     },
+    /// v3: `src` не 0 и не 1 или цель не начало инструкции. Интерпретатор
+    /// завершает программу ошибкой `UnsupportedInstruction`.
+    Invalid,
 }
 
 impl Cfg {
@@ -66,18 +79,24 @@ impl Cfg {
         let entrypoint = executable.get_entrypoint_instruction_offset();
 
         let insns = decode(executable.get_text_bytes().1);
+        let starts: BTreeSet<usize> = insns.iter().map(|insn| insn.ptr).collect();
         let calls: Vec<_> = insns
             .iter()
             .map(|insn| {
                 call_target(version, insn, |key| {
                     registry.lookup_by_key(key).map(|(_, pc)| pc)
                 })
+                .map(|call| match call {
+                    CallTarget::Internal { pc } if !starts.contains(&pc) => CallTarget::Invalid,
+                    call => call,
+                })
             })
             .collect();
 
         let mut names: BTreeMap<usize, String> = BTreeMap::new();
         for (_, (name, pc)) in registry.iter() {
-            if !name.is_empty() {
+            // `function_<pc>` загрузчик придумывает сам для целей call в v0.
+            if !name.is_empty() && !name.starts_with(b"function_") {
                 names.insert(
                     pc,
                     rustc_demangle::demangle(&String::from_utf8_lossy(name)).to_string(),
@@ -154,7 +173,7 @@ impl Cfg {
                     break;
                 }
             }
-            let last = &block.last().unwrap().insn;
+            let last = block.last().unwrap();
             let next = insns.get(i).map(|insn| insn.ptr);
             let successors = successors(version, last, next, &entries);
 
@@ -240,10 +259,14 @@ fn ends_block(version: SBPFVersion, insn: &Insn) -> bool {
 
 fn successors(
     version: SBPFVersion,
-    last: &Insn,
+    last: &Instruction,
     next: Option<usize>,
     entries: &BTreeSet<usize>,
 ) -> Vec<usize> {
+    if last.call == Some(CallTarget::Invalid) {
+        return vec![];
+    }
+    let last = &last.insn;
     match last.opc {
         ebpf::EXIT => vec![],
         ebpf::JA => vec![jump_target(version, last).unwrap()],
@@ -277,12 +300,12 @@ fn call_target(
             let hash = insn.imm as u32;
             let syscall = |name| CallTarget::Syscall { hash, name };
             if version.static_syscalls() {
-                Some(if insn.src == 0 {
-                    syscall(syscall_name(hash))
-                } else {
-                    CallTarget::Internal {
+                Some(match insn.src {
+                    0 => syscall(syscall_name(hash)),
+                    1 => CallTarget::Internal {
                         pc: version.calculate_call_imm_target_pc(insn.ptr, insn.imm) as usize,
-                    }
+                    },
+                    _ => CallTarget::Invalid,
                 })
             } else if let Some(name) = syscall_name(hash) {
                 Some(syscall(Some(name)))

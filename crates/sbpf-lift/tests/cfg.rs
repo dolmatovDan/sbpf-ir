@@ -4,18 +4,65 @@ mod common;
 
 use std::{collections::BTreeSet, path::Path};
 
-use sbpf_lift::{CallTarget, Cfg, Program};
+use sbpf_lift::{
+    Block, CallTarget, Cfg, Program,
+    solana_sbpf::{ebpf, program::SBPFVersion},
+};
+
+fn load(path: &Path) -> Program {
+    Program::load_file(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
 
 fn build(path: &Path) -> Cfg {
-    let program = Program::load_file(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    Cfg::build(&program)
+    Cfg::build(&load(path))
+}
+
+fn slots(insn: &ebpf::Insn) -> usize {
+    if insn.opc == ebpf::LD_DW_IMM { 2 } else { 1 }
+}
+
+fn is_jump(version: SBPFVersion, opc: u8) -> bool {
+    match opc & ebpf::BPF_CLS_MASK {
+        ebpf::BPF_JMP64 => !matches!(opc, ebpf::CALL_IMM | ebpf::CALL_REG | ebpf::EXIT),
+        ebpf::BPF_JMP32 => version.enable_jmp32(),
+        _ => false,
+    }
+}
+
+/// Преемники блока согласованы с его последней инструкцией.
+fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
+    let last = block.instructions.last().unwrap();
+    let insn = &last.insn;
+    let target = (insn.ptr as isize + insn.off as isize + 1) as usize;
+    let succ = &block.successors;
+    let ctx = format!("{name}: lbb_{} `{}` -> {succ:?}", block.start, last.text);
+    match insn.opc {
+        ebpf::EXIT => assert!(succ.is_empty(), "{ctx}"),
+        ebpf::JA => assert_eq!(succ, &[target], "{ctx}"),
+        opc if is_jump(cfg.version, opc) => {
+            let mut expected = vec![next.unwrap()];
+            if target != next.unwrap() {
+                expected.push(target);
+            }
+            assert_eq!(succ, &expected, "{ctx}");
+        }
+        ebpf::CALL_IMM | ebpf::CALL_REG => {
+            let returns = last.call != Some(CallTarget::Invalid)
+                && next.is_some_and(|pc| cfg.function_at(pc).is_none());
+            let expected: Vec<_> = next.filter(|_| returns).into_iter().collect();
+            assert_eq!(succ, &expected, "{ctx}");
+        }
+        _ => assert_eq!(succ, &next.into_iter().collect::<Vec<_>>(), "{ctx}"),
+    }
 }
 
 #[test]
 fn cfg_invariants() {
     for path in common::all_programs() {
         let name = path.display();
-        let cfg = build(&path);
+        let program = load(&path);
+        let cfg = Cfg::build(&program);
+        let text_slots = program.executable().get_text_bytes().1.len() / ebpf::INSN_SIZE;
         assert!(!cfg.functions.is_empty(), "{name}: нет функций");
 
         let mut next_pc = 0;
@@ -42,15 +89,19 @@ fn cfg_invariants() {
                     block.start
                 );
                 assert_eq!(block.instructions[0].insn.ptr, block.start);
-                next_pc = block.instructions.last().unwrap().insn.ptr
-                    + if block.instructions.last().unwrap().insn.opc
-                        == sbpf_lift::solana_sbpf::ebpf::LD_DW_IMM
-                    {
-                        2
-                    } else {
-                        1
-                    };
+                for pair in block.instructions.windows(2) {
+                    assert_eq!(pair[0].insn.ptr + slots(&pair[0].insn), pair[1].insn.ptr);
+                }
+                let last = &block.instructions.last().unwrap().insn;
+                next_pc = last.ptr + slots(last);
             }
+        }
+        assert_eq!(next_pc, text_slots, "{name}: блоки не покрывают .text");
+
+        let blocks: Vec<_> = cfg.blocks().collect();
+        for (i, block) in blocks.iter().enumerate() {
+            let next = blocks.get(i + 1).map(|b| b.start);
+            check_terminator(&cfg, block, next, &name.to_string());
         }
 
         for function in &cfg.functions {
@@ -87,22 +138,37 @@ fn cfg_invariants() {
 
 #[test]
 fn dot_export() {
-    let cfg = build(&common::programs_dir().join("bin/native-cpi.v0.so"));
-    let mut out = Vec::new();
-    sbpf_lift::write_dot(&cfg, &mut out).unwrap();
-    let dot = String::from_utf8(out).unwrap();
+    for version in ["v0", "v3"] {
+        let cfg = build(&common::programs_dir().join(format!("bin/native-cpi.{version}.so")));
+        let mut out = Vec::new();
+        sbpf_lift::write_dot(&cfg, &mut out).unwrap();
+        let dot = String::from_utf8(out).unwrap();
 
-    assert!(dot.starts_with("digraph cfg {") && dot.trim_end().ends_with('}'));
-    assert_eq!(
-        dot.matches("subgraph cluster_").count(),
-        cfg.functions.len()
-    );
-    let jumps = dot
-        .lines()
-        .filter(|l| l.contains(" -> ") && !l.contains("dashed"));
-    assert_eq!(
-        jumps.count(),
-        cfg.blocks().map(|b| b.successors.len()).sum::<usize>()
-    );
-    assert!(dot.contains("syscall sol_invoke_signed_rust"));
+        assert!(dot.starts_with("digraph cfg {") && dot.trim_end().ends_with('}'));
+        assert_eq!(
+            dot.matches("subgraph cluster_").count(),
+            cfg.functions.len()
+        );
+        let edges: Vec<_> = dot
+            .lines()
+            .filter(|l| l.starts_with("  lbb_") && l.contains(" -> lbb_"))
+            .collect();
+        let calls = edges.iter().filter(|l| l.contains("style=dashed")).count();
+        let call_pairs: BTreeSet<_> = cfg
+            .blocks()
+            .flat_map(|b| {
+                b.instructions.iter().filter_map(move |i| match i.call {
+                    Some(CallTarget::Internal { pc }) => Some((b.start, pc)),
+                    _ => None,
+                })
+            })
+            .collect();
+        assert_eq!(calls, call_pairs.len(), "{version}");
+        assert_eq!(
+            edges.len() - calls,
+            cfg.blocks().map(|b| b.successors.len()).sum::<usize>(),
+            "{version}"
+        );
+        assert!(dot.contains("syscall sol_invoke_signed_rust"), "{version}");
+    }
 }

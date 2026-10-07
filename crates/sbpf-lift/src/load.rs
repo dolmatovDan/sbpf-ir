@@ -16,7 +16,9 @@ use crate::syscalls::{NoExec, loader};
 pub enum LoadError {
     #[error("не удалось прочитать файл: {0}")]
     Io(#[from] io::Error),
-    #[error("не ELF: {0}")]
+    #[error("не ELF-файл")]
+    NotElf,
+    #[error("ошибка заголовка ELF: {0}")]
     Header(#[from] ElfParserError),
     /// Поддерживаются только v0 (контракты в мейннете) и v3 (новые деплои).
     #[error("неподдерживаемая версия sBPF: {0:?}")]
@@ -27,12 +29,19 @@ pub enum LoadError {
     Verifier(EbpfError),
 }
 
+/// Загруженная и проверенная программа.
 pub struct Program {
     executable: Executable<NoExec>,
 }
 
 impl Program {
+    /// ELF и релокации разбирает `solana-sbpf`, затем байткод проходит `RequisiteVerifier`,
+    /// как при деплое: дальше можно полагаться на допустимые опкоды, регистры,
+    /// переходы в пределах программы и целые `lddw`.
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
+        if !bytes.starts_with(b"\x7fELF") {
+            return Err(LoadError::NotElf);
+        }
         match get_sbpf_version(bytes)? {
             SBPFVersion::V0 | SBPFVersion::V3 => {}
             v => return Err(LoadError::UnsupportedVersion(v)),

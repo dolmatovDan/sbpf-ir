@@ -1,3 +1,5 @@
+//! CLI лифтера: `sbpf-lift cfg <file.so> [--dot] [-o FILE]`.
+
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -6,7 +8,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use sbpf_lift::{Cfg, Program, write_dot};
+use sbpf_lift::{Cfg, Program, solana_sbpf::ebpf, write_dot};
 
 #[derive(Parser)]
 #[command(name = "sbpf-lift", about = "Лифтер sBPF-байткода Solana в IR")]
@@ -84,7 +86,8 @@ fn print_cfg(cfg: &Cfg, w: &mut impl Write) -> io::Result<()> {
     for function in &cfg.functions {
         writeln!(w, "\nfn {} @ {}", function.name, function.entry)?;
         for block in &function.blocks {
-            let end = block.instructions.last().unwrap().insn.ptr;
+            let last = &block.instructions.last().unwrap().insn;
+            let end = last.ptr + usize::from(last.opc == ebpf::LD_DW_IMM);
             let succ: Vec<_> = block
                 .successors
                 .iter()

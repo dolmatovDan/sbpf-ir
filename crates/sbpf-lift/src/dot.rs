@@ -12,7 +12,7 @@ pub fn write_dot(cfg: &Cfg, w: &mut impl io::Write) -> io::Result<()> {
     let mut calls = BTreeSet::new();
     for function in &cfg.functions {
         writeln!(w, "  subgraph cluster_{} {{", function.entry)?;
-        writeln!(w, "    label=\"{}\";", escape(&function.name))?;
+        writeln!(w, "    label=<{}>;", escape(&function.name))?;
         for block in &function.blocks {
             write!(
                 w,
