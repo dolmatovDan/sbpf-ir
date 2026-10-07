@@ -84,3 +84,25 @@ fn cfg_invariants() {
         assert_eq!(cfg.unknown_syscalls(), [], "{name}: неизвестные syscall'ы");
     }
 }
+
+#[test]
+fn dot_export() {
+    let cfg = build(&common::programs_dir().join("bin/native-cpi.v0.so"));
+    let mut out = Vec::new();
+    sbpf_lift::write_dot(&cfg, &mut out).unwrap();
+    let dot = String::from_utf8(out).unwrap();
+
+    assert!(dot.starts_with("digraph cfg {") && dot.trim_end().ends_with('}'));
+    assert_eq!(
+        dot.matches("subgraph cluster_").count(),
+        cfg.functions.len()
+    );
+    let jumps = dot
+        .lines()
+        .filter(|l| l.contains(" -> ") && !l.contains("dashed"));
+    assert_eq!(
+        jumps.count(),
+        cfg.blocks().map(|b| b.successors.len()).sum::<usize>()
+    );
+    assert!(dot.contains("syscall sol_invoke_signed_rust"));
+}
