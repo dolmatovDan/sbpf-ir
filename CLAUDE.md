@@ -48,7 +48,9 @@ tests/programs/build.sh [программа ...]           # пересобра�
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
 ```
 
-Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR`. `load_smoke` ожидает ровно 6 файлов в `bin/` (3 программы × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`.
+Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 6 файлов в `bin/` (3 программы × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
+
+CI (`.github/workflows/ci.yml`) собирает с `RUSTFLAGS=-D warnings` и запускает `cargo fmt --all --check`, `cargo clippy --all-targets --locked`, `cargo test --locked`: любое предупреждение или неформатированный код валит сборку.
 
 ## Окружение для сборки тестовых контрактов
 
