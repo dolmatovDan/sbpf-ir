@@ -1,5 +1,9 @@
 //! Типы IR. Формат и семантика — `docs/ir.md`.
 
+mod json;
+
+use serde::{Deserialize, Serialize};
+
 pub const FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,6 +111,8 @@ pub enum TypeError {
         left: u32,
         right: u32,
     },
+    #[error("{op}: недопустимая ширина {w}")]
+    BadOperandWidth { op: &'static str, w: u32 },
     #[error("{op}: недопустимая ширина {from} → {to}")]
     BadWidth {
         op: &'static str,
@@ -116,6 +122,20 @@ pub enum TypeError {
 }
 
 impl BinOp {
+    pub const ALL: [Self; 11] = [
+        BinOp::Add,
+        BinOp::Sub,
+        BinOp::Mul,
+        BinOp::And,
+        BinOp::Or,
+        BinOp::Xor,
+        BinOp::Udiv,
+        BinOp::Urem,
+        BinOp::Shl,
+        BinOp::Lshr,
+        BinOp::Ashr,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             BinOp::Add => "add",
@@ -134,6 +154,8 @@ impl BinOp {
 }
 
 impl UnOp {
+    pub const ALL: [Self; 2] = [UnOp::Neg, UnOp::Bswap];
+
     pub fn name(self) -> &'static str {
         match self {
             UnOp::Neg => "neg",
@@ -143,6 +165,8 @@ impl UnOp {
 }
 
 impl ExtOp {
+    pub const ALL: [Self; 3] = [ExtOp::Zext, ExtOp::Sext, ExtOp::Trunc];
+
     pub fn name(self) -> &'static str {
         match self {
             ExtOp::Zext => "zext",
@@ -153,6 +177,19 @@ impl ExtOp {
 }
 
 impl CmpOp {
+    pub const ALL: [Self; 10] = [
+        CmpOp::Eq,
+        CmpOp::Ne,
+        CmpOp::Ult,
+        CmpOp::Ule,
+        CmpOp::Ugt,
+        CmpOp::Uge,
+        CmpOp::Slt,
+        CmpOp::Sle,
+        CmpOp::Sgt,
+        CmpOp::Sge,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             CmpOp::Eq => "eq",
@@ -175,7 +212,7 @@ impl Expr {
     }
 
     /// Старшие биты сверх `w` отбрасываются.
-    pub fn konst(value: u64, w: Width) -> Self {
+    pub fn constant(value: u64, w: Width) -> Self {
         Expr::Const {
             value: value & w.mask(),
             w,
@@ -183,11 +220,11 @@ impl Expr {
     }
 
     pub fn c64(value: u64) -> Self {
-        Self::konst(value, Width::W64)
+        Self::constant(value, Width::W64)
     }
 
     pub fn c32(value: u32) -> Self {
-        Self::konst(value.into(), Width::W32)
+        Self::constant(value.into(), Width::W32)
     }
 
     pub fn bin(op: BinOp, a: Expr, b: Expr) -> Self {
@@ -232,10 +269,9 @@ impl Expr {
             Expr::Un(op, a) => {
                 let w = bv(op.name(), a)?;
                 if *op == UnOp::Bswap && w == Width::W8 {
-                    return Err(TypeError::BadWidth {
+                    return Err(TypeError::BadOperandWidth {
                         op: op.name(),
-                        from: 8,
-                        to: 8,
+                        w: 8,
                     });
                 }
                 Ok(Ty::Bv(w))
@@ -279,14 +315,15 @@ fn same_width(op: &'static str, a: &Expr, b: &Expr) -> Result<Width, TypeError> 
     Ok(left)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fault {
     DivideByZero,
     UnsupportedInstruction,
     ExecutionOverrun,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
 pub enum Stmt {
     Assign {
         pc: usize,
@@ -312,11 +349,13 @@ pub enum Stmt {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Exit {
     /// Без `pc` — продолжение в следующий блок, с `pc` — инструкция `ja`.
     Next {
         target: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         pc: Option<usize>,
     },
     Branch {
@@ -351,7 +390,7 @@ pub enum Exit {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     pub start: usize,
     pub noreturn: bool,
@@ -359,24 +398,27 @@ pub struct Block {
     pub exit: Exit,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Function {
     pub entry: usize,
     pub name: String,
     pub blocks: Vec<Block>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoRegion {
+    #[serde(with = "json::hex")]
     pub vaddr: u64,
+    #[serde(with = "json::base64")]
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Module {
     pub format_version: u32,
     pub sbpf_version: u8,
     pub entrypoint: usize,
+    #[serde(with = "json::hex")]
     pub text_vaddr: u64,
     pub ro_region: RoRegion,
     pub address_taken: Vec<usize>,
@@ -434,9 +476,9 @@ mod tests {
     }
 
     #[test]
-    fn konst_masks_to_width() {
+    fn constant_masks_to_width() {
         assert_eq!(
-            Expr::konst(0xffff_ffff_ffff_fff0, W8),
+            Expr::constant(0xffff_ffff_ffff_fff0, W8),
             Expr::Const { value: 0xf0, w: W8 }
         );
     }
