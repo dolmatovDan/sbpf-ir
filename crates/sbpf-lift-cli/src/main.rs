@@ -104,11 +104,11 @@ fn run(command: Command) -> Result<(), String> {
             output,
         } => {
             let (program, cfg) = load(&file)?;
-            let module = lift_module(&file, &program, &cfg)?;
             let entries: Vec<usize> = select(&cfg, function.as_deref())?
                 .iter()
                 .map(|f| f.entry)
                 .collect();
+            let module = lift_module(&file, &program, &cfg)?;
             let functions = module
                 .functions
                 .iter()
