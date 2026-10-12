@@ -1,4 +1,4 @@
-//! CLI лифтера: `sbpf-lift {cfg | lift | ir} <file.so> ...`.
+//! CLI лифтера: `sbpf-lift {cfg | lift | ir} <file.so> ...`, `sbpf-lift run <example.json>`.
 
 use std::{
     fs::File,
@@ -52,9 +52,27 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Исполнить контракт на примере через Mollusk (формат — docs/runner.md).
+    Run {
+        example: PathBuf,
+        /// Добавить финальные регистры r0..r10 и pc.
+        #[arg(long)]
+        registers: bool,
+        /// Добавить трассу регистров по каждой инструкции.
+        #[arg(long)]
+        trace: bool,
+        /// Файл для вывода (по умолчанию stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
+    if std::env::var_os("RUST_LOG").is_none() {
+        // Mollusk включает debug-логи рантайма; логи программы и так есть в выводе run.
+        // SAFETY: других потоков ещё нет.
+        unsafe { std::env::set_var("RUST_LOG", "error") };
+    }
     match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -114,6 +132,19 @@ fn run(command: Command) -> Result<(), String> {
                 .iter()
                 .filter(|f| entries.binary_search(&f.entry).is_ok());
             write_output(output.as_deref(), |w| write_ir(&module, functions, w))
+        }
+        Command::Run {
+            example,
+            registers,
+            trace,
+            output,
+        } => {
+            let options = sbpf_run::Options { registers, trace };
+            let outcome = sbpf_run::run_file(&example, options).map_err(|e| e.to_string())?;
+            write_output(output.as_deref(), |w| {
+                serde_json::to_writer_pretty(&mut *w, &outcome)?;
+                writeln!(w)
+            })
         }
     }
 }

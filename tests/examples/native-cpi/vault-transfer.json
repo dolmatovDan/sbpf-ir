@@ -1,0 +1,26 @@
+{
+  "program": "../../programs/bin/native-cpi.v0.so",
+  "program_id": "Cpi1111111111111111111111111111111111111111",
+  "instruction_data": "01e093040000000000",
+  "accounts": [
+    {
+      "key": "8tujTm84Dgi5nxEbPbXcrpoCsWgsLYBC4FKiMhsqbqVL",
+      "owner": "11111111111111111111111111111111",
+      "lamports": 2000000,
+      "is_signer": false,
+      "is_writable": true
+    },
+    {
+      "key": "Bob1111111111111111111111111111111111111111",
+      "owner": "11111111111111111111111111111111",
+      "lamports": 1000000,
+      "is_writable": true
+    },
+    {
+      "key": "11111111111111111111111111111111",
+      "owner": "NativeLoader1111111111111111111111111111111",
+      "lamports": 1,
+      "executable": true
+    }
+  ]
+}
