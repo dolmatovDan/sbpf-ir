@@ -1742,6 +1742,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "sbpf-lift",
+ "sbpf-run",
+ "serde_json",
 ]
 
 [[package]]
