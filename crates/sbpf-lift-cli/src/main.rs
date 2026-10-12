@@ -48,6 +48,11 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    if std::env::var_os("RUST_LOG").is_none() {
+        // Mollusk включает debug-логи рантайма; логи программы и так есть в выводе run.
+        // SAFETY: других потоков ещё нет.
+        unsafe { std::env::set_var("RUST_LOG", "error") };
+    }
     match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
