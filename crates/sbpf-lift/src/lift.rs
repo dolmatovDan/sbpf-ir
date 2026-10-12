@@ -1,8 +1,15 @@
 //! Лифтер: инструкции sBPF → IR по таблицам «Перевод инструкций» из `docs/ir.md`.
 
-use solana_sbpf::ebpf::{self, Insn};
+use solana_sbpf::{
+    ebpf::{self, Insn},
+    program::SBPFVersion,
+};
 
-use crate::ir::{BinOp, CmpOp, Expr, Fault, Stmt, UnOp, Width};
+use crate::{
+    CallTarget, Instruction,
+    cfg::jump_target,
+    ir::{BinOp, CmpOp, Exit, Expr, Fault, Stmt, UnOp, Width},
+};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LiftError {
@@ -10,10 +17,110 @@ pub enum LiftError {
     UnsupportedOpcode { pc: usize, opc: u8 },
 }
 
+/// Выход блока, который кончается инструкцией `ins`; `None`, если она не передаёт
+/// управление. `next` — pc следующей инструкции, `None` у последней в программе.
+fn lift_exit(
+    version: SBPFVersion,
+    ins: &Instruction,
+    next: Option<usize>,
+) -> Result<Option<Exit>, LiftError> {
+    let insn = &ins.insn;
+    let pc = insn.ptr;
+    let exit = match insn.opc {
+        ebpf::EXIT => Exit::Return { pc },
+        ebpf::CALL_IMM | ebpf::CALL_REG => match &ins.call {
+            Some(CallTarget::Internal { pc: target }) => Exit::Call {
+                pc,
+                target: *target,
+                next,
+            },
+            Some(CallTarget::Syscall { hash, name }) => Exit::Syscall {
+                pc,
+                hash: *hash,
+                name: name.map(String::from),
+                next,
+            },
+            Some(CallTarget::Indirect { reg }) => Exit::Callx {
+                pc,
+                reg: *reg,
+                next,
+            },
+            Some(CallTarget::Invalid) => Exit::Trap {
+                pc,
+                error: Fault::UnsupportedInstruction,
+            },
+            None => return Err(unsupported(insn)),
+        },
+        _ => {
+            let Some(target) = jump_target(version, insn) else {
+                return Ok(None);
+            };
+            if insn.opc == ebpf::JA {
+                Exit::Next {
+                    target,
+                    pc: Some(pc),
+                }
+            } else {
+                Exit::Branch {
+                    pc,
+                    cond: jump_cond(insn)?,
+                    then: target,
+                    // Условный переход в конце кода проваливается в ExecutionOverrun.
+                    r#else: pc + 1,
+                }
+            }
+        }
+    };
+    Ok(Some(exit))
+}
+
+/// Вызывается только для условных переходов: класс jmp32 в v0 отсекает `jump_target`.
+fn jump_cond(insn: &Insn) -> Result<Expr, LiftError> {
+    let reg_src = insn.opc & ebpf::BPF_X != 0;
+    let (a, b, w) = if insn.opc & ebpf::BPF_CLS_MASK == ebpf::BPF_JMP32 {
+        let b = if reg_src {
+            Expr::lo32(Expr::reg(insn.src))
+        } else {
+            Expr::c32(insn.imm as u32)
+        };
+        (Expr::lo32(Expr::reg(insn.dst)), b, Width::W32)
+    } else {
+        let b = if reg_src {
+            Expr::reg(insn.src)
+        } else {
+            Expr::c64(insn.imm as u64)
+        };
+        (Expr::reg(insn.dst), b, Width::W64)
+    };
+    let op = match insn.opc & ebpf::BPF_ALU_OP_MASK {
+        ebpf::BPF_JEQ => CmpOp::Eq,
+        ebpf::BPF_JNE => CmpOp::Ne,
+        ebpf::BPF_JGT => CmpOp::Ugt,
+        ebpf::BPF_JGE => CmpOp::Uge,
+        ebpf::BPF_JLT => CmpOp::Ult,
+        ebpf::BPF_JLE => CmpOp::Ule,
+        ebpf::BPF_JSGT => CmpOp::Sgt,
+        ebpf::BPF_JSGE => CmpOp::Sge,
+        ebpf::BPF_JSLT => CmpOp::Slt,
+        ebpf::BPF_JSLE => CmpOp::Sle,
+        ebpf::BPF_JSET => {
+            return Ok(Expr::cmp(
+                CmpOp::Ne,
+                Expr::bin(BinOp::And, a, b),
+                Expr::constant(0, w),
+            ));
+        }
+        _ => return Err(unsupported(insn)),
+    };
+    Ok(Expr::cmp(op, a, b))
+}
+
 /// Statement'ы инструкции, которая не передаёт управление.
 fn lift_stmts(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
+    if matches!(insn.opc, ebpf::LE | ebpf::BE) {
+        return byte_order(insn);
+    }
     match insn.opc & ebpf::BPF_CLS_MASK {
-        _ if matches!(insn.opc, ebpf::LE | ebpf::BE) => byte_order(insn),
         ebpf::BPF_ALU64_STORE => alu(insn, Width::W64),
         ebpf::BPF_ALU32_LOAD => alu(insn, Width::W32),
         ebpf::BPF_LD | ebpf::BPF_LDX | ebpf::BPF_ST | ebpf::BPF_STX => memory(insn),
@@ -417,6 +524,161 @@ mod tests {
                 addr: addr(10, -8),
                 value: r(2),
             }],
+        );
+    }
+
+    fn exit_of(version: SBPFVersion, insn: Insn, call: Option<CallTarget>) -> Option<Exit> {
+        let ins = Instruction {
+            insn,
+            text: String::new(),
+            call,
+        };
+        lift_exit(version, &ins, Some(8)).unwrap()
+    }
+
+    #[test]
+    fn jumps() {
+        use CmpOp::*;
+        let branch = |cond| Exit::Branch {
+            pc: 7,
+            cond,
+            then: 7 + 1 + 5,
+            r#else: 8,
+        };
+        for version in [SBPFVersion::V0, SBPFVersion::V3] {
+            let exit = |insn| exit_of(version, insn, None);
+            assert_eq!(
+                exit(insn(ebpf::JA, 0, 0, -3, 0)),
+                Some(Exit::Next {
+                    target: 5,
+                    pc: Some(7)
+                })
+            );
+            assert_eq!(
+                exit(insn(ebpf::JEQ64_IMM, 1, 0, 5, -1)),
+                Some(branch(Expr::cmp(Eq, r(1), Expr::c64(u64::MAX))))
+            );
+            assert_eq!(
+                exit(insn(ebpf::JGT64_REG, 1, 2, 5, 0)),
+                Some(branch(Expr::cmp(Ugt, r(1), r(2))))
+            );
+            assert_eq!(
+                exit(insn(ebpf::JSLT64_IMM, 1, 0, 5, -2)),
+                Some(branch(Expr::cmp(Slt, r(1), Expr::c64(-2i64 as u64))))
+            );
+            assert_eq!(
+                exit(insn(ebpf::JSET64_REG, 1, 2, 5, 0)),
+                Some(branch(Expr::cmp(
+                    Ne,
+                    Expr::bin(BinOp::And, r(1), r(2)),
+                    Expr::c64(0)
+                )))
+            );
+            assert_eq!(exit(insn(ebpf::ADD64_IMM, 1, 0, 0, 1)), None);
+        }
+
+        let exit = |insn| exit_of(SBPFVersion::V3, insn, None);
+        assert_eq!(
+            exit(insn(ebpf::JSGE32_IMM, 1, 0, 5, -1)),
+            Some(branch(Expr::cmp(
+                Sge,
+                Expr::lo32(r(1)),
+                Expr::c32(u32::MAX)
+            )))
+        );
+        assert_eq!(
+            exit(insn(ebpf::JLE32_REG, 1, 2, 5, 0)),
+            Some(branch(Expr::cmp(Ule, Expr::lo32(r(1)), Expr::lo32(r(2)))))
+        );
+        assert_eq!(
+            exit(insn(ebpf::JSET32_IMM, 1, 0, 5, 0x80)),
+            Some(branch(Expr::cmp(
+                Ne,
+                Expr::bin(BinOp::And, Expr::lo32(r(1)), Expr::c32(0x80)),
+                Expr::c32(0)
+            )))
+        );
+        // В v0 класса jmp32 нет: инструкцию отвергает lift_stmts.
+        assert_eq!(
+            exit_of(SBPFVersion::V0, insn(ebpf::JEQ32_IMM, 1, 0, 5, 0), None),
+            None
+        );
+        assert!(lift_stmts(&insn(ebpf::JEQ32_IMM, 1, 0, 5, 0)).is_err());
+    }
+
+    #[test]
+    fn calls() {
+        let next = Some(8);
+        let call = |target| {
+            exit_of(
+                SBPFVersion::V3,
+                insn(ebpf::CALL_IMM, 0, 1, 0, 0),
+                Some(target),
+            )
+        };
+        assert_eq!(
+            call(CallTarget::Internal { pc: 84 }),
+            Some(Exit::Call {
+                pc: 7,
+                target: 84,
+                next
+            })
+        );
+        assert_eq!(
+            call(CallTarget::Syscall {
+                hash: 0x207559bd,
+                name: Some("sol_log_")
+            }),
+            Some(Exit::Syscall {
+                pc: 7,
+                hash: 0x207559bd,
+                name: Some("sol_log_".into()),
+                next
+            })
+        );
+        assert_eq!(
+            call(CallTarget::Syscall {
+                hash: 1,
+                name: None
+            }),
+            Some(Exit::Syscall {
+                pc: 7,
+                hash: 1,
+                name: None,
+                next
+            })
+        );
+        assert_eq!(
+            call(CallTarget::Indirect { reg: 4 }),
+            Some(Exit::Callx {
+                pc: 7,
+                reg: 4,
+                next
+            })
+        );
+        assert_eq!(
+            call(CallTarget::Invalid),
+            Some(Exit::Trap {
+                pc: 7,
+                error: Fault::UnsupportedInstruction
+            })
+        );
+        assert_eq!(
+            exit_of(SBPFVersion::V0, insn(ebpf::EXIT, 0, 0, 0, 0), None),
+            Some(Exit::Return { pc: 7 })
+        );
+        let last = Instruction {
+            insn: insn(ebpf::CALL_REG, 0, 0, 0, 3),
+            text: String::new(),
+            call: Some(CallTarget::Indirect { reg: 3 }),
+        };
+        assert_eq!(
+            lift_exit(SBPFVersion::V0, &last, None),
+            Ok(Some(Exit::Callx {
+                pc: 7,
+                reg: 3,
+                next: None
+            }))
         );
     }
 

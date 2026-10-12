@@ -285,7 +285,7 @@ fn is_jump(version: SBPFVersion, insn: &Insn) -> bool {
     }
 }
 
-fn jump_target(version: SBPFVersion, insn: &Insn) -> Option<usize> {
+pub(crate) fn jump_target(version: SBPFVersion, insn: &Insn) -> Option<usize> {
     is_jump(version, insn).then(|| (insn.ptr as isize + insn.off as isize + 1) as usize)
 }
 
