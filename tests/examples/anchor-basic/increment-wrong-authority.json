@@ -1,0 +1,20 @@
+{
+  "program": "../../programs/bin/anchor-basic.v0.so",
+  "program_id": "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS",
+  "instruction_data": "0b12680968ae3b210300000000000000",
+  "accounts": [
+    {
+      "key": "Counter111111111111111111111111111111111111",
+      "owner": "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS",
+      "lamports": 1224960,
+      "data": "ffb004f5bcfd7c19028a0813dfb130d2b98783703017b4f4c5cc1e336466660a10fdc300000000000500000000000000",
+      "is_writable": true
+    },
+    {
+      "key": "Eve1111111111111111111111111111111111111111",
+      "owner": "11111111111111111111111111111111",
+      "lamports": 1000000,
+      "is_signer": true
+    }
+  ]
+}
