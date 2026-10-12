@@ -1,4 +1,4 @@
-//! CLI лифтера: `sbpf-lift cfg <file.so> ...`, `sbpf-lift run <example.json>`.
+//! CLI лифтера: `sbpf-lift {cfg | lift | ir} <file.so> ...`, `sbpf-lift run <example.json>`.
 
 use std::{
     fs::File,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use sbpf_lift::{Cfg, Function, Program, solana_sbpf::ebpf, write_dot};
+use sbpf_lift::{Cfg, Function, Program, ir, lift, solana_sbpf::ebpf, write_dot, write_ir};
 
 #[derive(Parser)]
 #[command(name = "sbpf-lift", about = "Лифтер sBPF-байткода Solana в IR")]
@@ -25,6 +25,26 @@ enum Command {
         /// Вывести в формате Graphviz DOT.
         #[arg(long)]
         dot: bool,
+        /// Только одна функция: имя или pc входа.
+        #[arg(short, long)]
+        function: Option<String>,
+        /// Файл для вывода (по умолчанию stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// IR программы в JSON (формат — docs/ir.md).
+    Lift {
+        file: PathBuf,
+        /// С отступами.
+        #[arg(long)]
+        pretty: bool,
+        /// Файл для вывода (по умолчанию stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// IR программы в текстовом виде.
+    Ir {
+        file: PathBuf,
         /// Только одна функция: имя или pc входа.
         #[arg(short, long)]
         function: Option<String>,
@@ -80,6 +100,39 @@ fn run(command: Command) -> Result<(), String> {
                 }
             })
         }
+        Command::Lift {
+            file,
+            pretty,
+            output,
+        } => {
+            let (program, cfg) = load(&file)?;
+            let module = lift_module(&file, &program, &cfg)?;
+            write_output(output.as_deref(), |w| {
+                if pretty {
+                    serde_json::to_writer_pretty(&mut *w, &module)?;
+                } else {
+                    serde_json::to_writer(&mut *w, &module)?;
+                }
+                writeln!(w)
+            })
+        }
+        Command::Ir {
+            file,
+            function,
+            output,
+        } => {
+            let (program, cfg) = load(&file)?;
+            let entries: Vec<usize> = select(&cfg, function.as_deref())?
+                .iter()
+                .map(|f| f.entry)
+                .collect();
+            let module = lift_module(&file, &program, &cfg)?;
+            let functions = module
+                .functions
+                .iter()
+                .filter(|f| entries.binary_search(&f.entry).is_ok());
+            write_output(output.as_deref(), |w| write_ir(&module, functions, w))
+        }
         Command::Run {
             example,
             registers,
@@ -103,6 +156,10 @@ fn load(file: &Path) -> Result<(Program, Cfg), String> {
         eprintln!("предупреждение: pc {pc}: неизвестный syscall {hash:#010x}");
     }
     Ok((program, cfg))
+}
+
+fn lift_module(file: &Path, program: &Program, cfg: &Cfg) -> Result<ir::Module, String> {
+    lift(program, cfg).map_err(|e| format!("{}: {e}", file.display()))
 }
 
 fn select<'a>(cfg: &'a Cfg, function: Option<&str>) -> Result<Vec<&'a Function>, String> {

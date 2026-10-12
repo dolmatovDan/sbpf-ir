@@ -1,0 +1,677 @@
+{
+  "functions": [
+    {
+      "entry": 76,
+      "name": "fn_76",
+      "blocks": [
+        {
+          "start": 76,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 76,
+              "dst": 0,
+              "value": {
+                "const": "0x1",
+                "w": 64
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 77,
+              "dst": 3,
+              "value": {
+                "const": "0x1",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "branch",
+            "pc": 78,
+            "cond": {
+              "op": "slt",
+              "args": [
+                {
+                  "reg": 1
+                },
+                {
+                  "reg": 2
+                }
+              ]
+            },
+            "then": 80,
+            "else": 79
+          }
+        },
+        {
+          "start": 79,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 79,
+              "dst": 3,
+              "value": {
+                "const": "0x0",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "next",
+            "target": 80
+          }
+        },
+        {
+          "start": 80,
+          "noreturn": false,
+          "statements": [],
+          "exit": {
+            "kind": "branch",
+            "pc": 80,
+            "cond": {
+              "op": "sgt",
+              "args": [
+                {
+                  "reg": 1
+                },
+                {
+                  "reg": 2
+                }
+              ]
+            },
+            "then": 82,
+            "else": 81
+          }
+        },
+        {
+          "start": 81,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 81,
+              "dst": 0,
+              "value": {
+                "const": "0x0",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "next",
+            "target": 82
+          }
+        },
+        {
+          "start": 82,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 82,
+              "dst": 0,
+              "value": {
+                "op": "sub",
+                "args": [
+                  {
+                    "reg": 0
+                  },
+                  {
+                    "reg": 3
+                  }
+                ]
+              }
+            }
+          ],
+          "exit": {
+            "kind": "return",
+            "pc": 83
+          }
+        }
+      ]
+    },
+    {
+      "entry": 84,
+      "name": "fn_84",
+      "blocks": [
+        {
+          "start": 84,
+          "noreturn": false,
+          "statements": [],
+          "exit": {
+            "kind": "branch",
+            "pc": 84,
+            "cond": {
+              "op": "eq",
+              "args": [
+                {
+                  "reg": 3
+                },
+                {
+                  "const": "0x0",
+                  "w": 64
+                }
+              ]
+            },
+            "then": 90,
+            "else": 85
+          }
+        },
+        {
+          "start": 85,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "check",
+              "pc": 85,
+              "cond": {
+                "op": "ne",
+                "args": [
+                  {
+                    "reg": 3
+                  },
+                  {
+                    "const": "0x0",
+                    "w": 64
+                  }
+                ]
+              },
+              "error": "DivideByZero"
+            },
+            {
+              "op": "assign",
+              "pc": 85,
+              "dst": 2,
+              "value": {
+                "op": "udiv",
+                "args": [
+                  {
+                    "reg": 2
+                  },
+                  {
+                    "reg": 3
+                  }
+                ]
+              }
+            },
+            {
+              "op": "store",
+              "pc": 86,
+              "w": 64,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x8",
+                    "w": 64
+                  }
+                ]
+              },
+              "value": {
+                "reg": 2
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 87,
+              "dst": 2,
+              "value": {
+                "const": "0x0",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "next",
+            "target": 88
+          }
+        },
+        {
+          "start": 88,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "store",
+              "pc": 88,
+              "w": 32,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x0",
+                    "w": 64
+                  }
+                ]
+              },
+              "value": {
+                "op": "trunc",
+                "w": 32,
+                "args": [
+                  {
+                    "reg": 2
+                  }
+                ]
+              }
+            }
+          ],
+          "exit": {
+            "kind": "return",
+            "pc": 89
+          }
+        },
+        {
+          "start": 90,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "store",
+              "pc": 90,
+              "w": 32,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x4",
+                    "w": 64
+                  }
+                ]
+              },
+              "value": {
+                "const": "0x17",
+                "w": 32
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 91,
+              "dst": 2,
+              "value": {
+                "const": "0x1",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "next",
+            "target": 88,
+            "pc": 92
+          }
+        }
+      ]
+    },
+    {
+      "entry": 173,
+      "name": "fn_173",
+      "blocks": [
+        {
+          "start": 173,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 173,
+              "dst": 0,
+              "value": {
+                "reg": 2
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 174,
+              "dst": 0,
+              "value": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 0
+                  },
+                  {
+                    "reg": 1
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 175,
+              "dst": 0,
+              "value": {
+                "op": "mul",
+                "args": [
+                  {
+                    "reg": 0
+                  },
+                  {
+                    "const": "0x3",
+                    "w": 64
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 176,
+              "dst": 1,
+              "value": {
+                "op": "shl",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x5",
+                    "w": 64
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 177,
+              "dst": 0,
+              "value": {
+                "op": "xor",
+                "args": [
+                  {
+                    "reg": 0
+                  },
+                  {
+                    "reg": 1
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 178,
+              "dst": 1,
+              "value": {
+                "const": "0xfffffffe",
+                "w": 64
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 180,
+              "dst": 2,
+              "value": {
+                "op": "and",
+                "args": [
+                  {
+                    "reg": 2
+                  },
+                  {
+                    "reg": 1
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 181,
+              "dst": 2,
+              "value": {
+                "op": "lshr",
+                "args": [
+                  {
+                    "reg": 2
+                  },
+                  {
+                    "const": "0x1",
+                    "w": 64
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 182,
+              "dst": 0,
+              "value": {
+                "op": "or",
+                "args": [
+                  {
+                    "reg": 0
+                  },
+                  {
+                    "reg": 2
+                  }
+                ]
+              }
+            }
+          ],
+          "exit": {
+            "kind": "return",
+            "pc": 183
+          }
+        }
+      ]
+    },
+    {
+      "entry": 769,
+      "name": "fn_769",
+      "blocks": [
+        {
+          "start": 769,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "load",
+              "pc": 769,
+              "dst": 1,
+              "w": 64,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x0",
+                    "w": 64
+                  }
+                ]
+              }
+            }
+          ],
+          "exit": {
+            "kind": "branch",
+            "pc": 770,
+            "cond": {
+              "op": "eq",
+              "args": [
+                {
+                  "reg": 1
+                },
+                {
+                  "const": "0xffffffffffffffff",
+                  "w": 64
+                }
+              ]
+            },
+            "then": 778,
+            "else": 771
+          }
+        },
+        {
+          "start": 771,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "load",
+              "pc": 771,
+              "dst": 2,
+              "w": 64,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x8",
+                    "w": 64
+                  }
+                ]
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 772,
+              "dst": 2,
+              "value": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 2
+                  },
+                  {
+                    "const": "0xffffffffffffffff",
+                    "w": 64
+                  }
+                ]
+              }
+            },
+            {
+              "op": "store",
+              "pc": 773,
+              "w": 64,
+              "addr": {
+                "op": "add",
+                "args": [
+                  {
+                    "reg": 1
+                  },
+                  {
+                    "const": "0x8",
+                    "w": 64
+                  }
+                ]
+              },
+              "value": {
+                "reg": 2
+              }
+            }
+          ],
+          "exit": {
+            "kind": "branch",
+            "pc": 774,
+            "cond": {
+              "op": "ne",
+              "args": [
+                {
+                  "reg": 2
+                },
+                {
+                  "const": "0x0",
+                  "w": 64
+                }
+              ]
+            },
+            "then": 778,
+            "else": 775
+          }
+        },
+        {
+          "start": 775,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 775,
+              "dst": 2,
+              "value": {
+                "const": "0x28",
+                "w": 64
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 776,
+              "dst": 3,
+              "value": {
+                "const": "0x8",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "call",
+            "pc": 777,
+            "target": 34,
+            "next": 778
+          }
+        },
+        {
+          "start": 778,
+          "noreturn": false,
+          "statements": [],
+          "exit": {
+            "kind": "return",
+            "pc": 778
+          }
+        }
+      ]
+    },
+    {
+      "entry": 845,
+      "name": "fn_845",
+      "blocks": [
+        {
+          "start": 845,
+          "noreturn": false,
+          "statements": [
+            {
+              "op": "assign",
+              "pc": 845,
+              "dst": 1,
+              "value": {
+                "const": "0xc8",
+                "w": 64
+              }
+            },
+            {
+              "op": "assign",
+              "pc": 847,
+              "dst": 2,
+              "value": {
+                "const": "0x2e",
+                "w": 64
+              }
+            }
+          ],
+          "exit": {
+            "kind": "syscall",
+            "pc": 848,
+            "hash": 544561597,
+            "name": "sol_log_",
+            "next": 849
+          }
+        },
+        {
+          "start": 849,
+          "noreturn": true,
+          "statements": [],
+          "exit": {
+            "kind": "call",
+            "pc": 849,
+            "target": 850,
+            "next": 850
+          }
+        }
+      ]
+    }
+  ]
+}

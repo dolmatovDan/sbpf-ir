@@ -2,13 +2,18 @@
 
 mod cfg;
 mod dot;
+pub mod ir;
+mod lift;
 mod load;
+mod print;
 mod syscalls;
 
 pub use cfg::{
     Block, CallTarget, Cfg, FindFunctionError, Function, Instruction, NORETURN_SYSCALLS,
 };
 pub use dot::write_dot;
+pub use lift::{LiftError, lift};
 pub use load::{LoadError, Program};
+pub use print::write_ir;
 pub use solana_sbpf;
 pub use syscalls::{NoExec, SYSCALLS, syscall_name};

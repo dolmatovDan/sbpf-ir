@@ -343,3 +343,54 @@ fn dot_single_function() {
     assert_eq!(dot.matches("subgraph cluster_").count(), 1);
     assert!(!dot.contains("color=gray"));
 }
+
+/// Адрес функции берётся только там, где поток исполнения не проваливается: перед
+/// каждым входом из `address_taken` стоит `exit`, `ja` или `call`. Ложный вход
+/// (константа, случайно совпавшая с адресом кода) почти наверняка это нарушит.
+#[test]
+fn address_taken_follow_terminators() {
+    for path in common::all_programs() {
+        let cfg = build(&path);
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(!cfg.address_taken.is_empty(), "{name}");
+        let insns: Vec<_> = cfg.instructions().map(|i| &i.insn).collect();
+        for &pc in &cfg.address_taken {
+            let i = insns.iter().position(|insn| insn.ptr == pc).unwrap();
+            let Some(prev) = i.checked_sub(1).map(|i| insns[i]) else {
+                continue;
+            };
+            assert!(
+                matches!(
+                    prev.opc,
+                    ebpf::EXIT | ebpf::JA | ebpf::CALL_IMM | ebpf::CALL_REG
+                ),
+                "{name}: перед {pc} стоит {:#04x}",
+                prev.opc
+            );
+        }
+    }
+}
+
+/// Без символов адресные функции становятся входами только через `address_taken`:
+/// в stripped-контрактах из мейннета их заметная доля.
+#[test]
+fn address_taken_adds_entries() {
+    for name in common::MAINNET {
+        let cfg = build(&common::mainnet_program(name));
+        let called: BTreeSet<_> = cfg
+            .instructions()
+            .filter_map(|i| match i.call {
+                Some(CallTarget::Internal { pc }) => Some(pc),
+                _ => None,
+            })
+            .collect();
+        let only_address = cfg
+            .address_taken
+            .iter()
+            .filter(|pc| {
+                !called.contains(pc) && cfg.function_at(**pc).unwrap().name.starts_with("fn_")
+            })
+            .count();
+        assert!(only_address > 0, "{name}");
+    }
+}

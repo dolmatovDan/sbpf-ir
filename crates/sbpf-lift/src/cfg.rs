@@ -4,8 +4,9 @@
 //! программы там заполняется только из отладочных символов) и теряет ребро
 //! проваливания у первого блока функции.
 //!
-//! Входы функций: точка входа, символы из registry и цели `call`. Функция без
-//! символа, вызываемая только через `callx`, окажется внутри предыдущей.
+//! Входы функций: точка входа, символы из registry, цели `call` и адреса кода,
+//! которые встречаются в программе (кандидаты для `callx`). Функция без символа,
+//! адрес которой вычисляется иначе, окажется внутри предыдущей.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +25,9 @@ pub struct Cfg {
     pub entrypoint: usize,
     /// В порядке адресов; блоки функции идут подряд от её входа до входа следующей.
     pub functions: Vec<Function>,
+    /// Входы, чей адрес встречается как константа `lddw` или как выровненное 8-байтное
+    /// слово read-only региона вне кода.
+    pub address_taken: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -93,8 +97,16 @@ impl Cfg {
         let registry = executable.get_function_registry();
         let entrypoint = executable.get_entrypoint_instruction_offset();
 
-        let insns = decode(executable.get_text_bytes().1);
+        let (text_vaddr, text) = executable.get_text_bytes();
+        let insns = decode(text);
         let starts: BTreeSet<usize> = insns.iter().map(|insn| insn.ptr).collect();
+        let address_taken = address_taken(
+            &insns,
+            &starts,
+            text_vaddr..text_vaddr + text.len() as u64,
+            executable.get_ro_region().vm_addr_range().start,
+            executable.get_ro_section(),
+        );
         let calls: Vec<_> = insns
             .iter()
             .map(|insn| {
@@ -123,6 +135,7 @@ impl Cfg {
         }
         let mut entries: BTreeSet<usize> = names.keys().copied().collect();
         entries.insert(entrypoint);
+        entries.extend(&address_taken);
         entries.extend(calls.iter().filter_map(|call| match call {
             Some(CallTarget::Internal { pc }) => Some(*pc),
             _ => None,
@@ -215,6 +228,7 @@ impl Cfg {
             version,
             entrypoint,
             functions,
+            address_taken,
         }
     }
 
@@ -260,6 +274,42 @@ impl Cfg {
     }
 }
 
+fn address_taken(
+    insns: &[Insn],
+    starts: &BTreeSet<usize>,
+    text: std::ops::Range<u64>,
+    ro_vaddr: u64,
+    ro: &[u8],
+) -> Vec<usize> {
+    let pc_at = |addr: u64| {
+        let offset = addr.checked_sub(text.start)?;
+        if addr >= text.end || offset % ebpf::INSN_SIZE as u64 != 0 {
+            return None;
+        }
+        let pc = (offset / ebpf::INSN_SIZE as u64) as usize;
+        starts.contains(&pc).then_some(pc)
+    };
+    let lddw = insns
+        .iter()
+        .filter(|insn| insn.opc == ebpf::LD_DW_IMM)
+        .map(|insn| insn.imm as u64);
+    let skip = (8 - ro_vaddr % 8) % 8;
+    let words = ro
+        .get(skip as usize..)
+        .unwrap_or_default()
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !text.contains(&(ro_vaddr + skip + 8 * i as u64)))
+        .map(|(_, &word)| u64::from_le_bytes(word));
+    lddw.chain(words)
+        .filter_map(pc_at)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 /// `lddw` занимает два слота и декодируется в одну инструкцию с 64-битным `imm`.
 fn decode(text: &[u8]) -> Vec<Insn> {
     let slots = text.len() / ebpf::INSN_SIZE;
@@ -285,7 +335,7 @@ fn is_jump(version: SBPFVersion, insn: &Insn) -> bool {
     }
 }
 
-fn jump_target(version: SBPFVersion, insn: &Insn) -> Option<usize> {
+pub(crate) fn jump_target(version: SBPFVersion, insn: &Insn) -> Option<usize> {
     is_jump(version, insn).then(|| (insn.ptr as isize + insn.off as isize + 1) as usize)
 }
 
@@ -323,7 +373,8 @@ fn mark_noreturn(functions: &mut [Function]) {
     }
     for block in functions.iter_mut().flat_map(|f| &mut f.blocks) {
         let last = block.instructions.last().unwrap();
-        block.noreturn = last.call.is_some() && !call_returns(&last.call, &returning);
+        block.noreturn = !matches!(last.call, None | Some(CallTarget::Invalid))
+            && !call_returns(&last.call, &returning);
     }
 }
 
@@ -342,6 +393,10 @@ fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
         }
         if !call_returns(&last.call, returning) {
             continue;
+        }
+        // Возврат из вызова сразу в другую функцию: ребра в CFG нет, исход неизвестен.
+        if last.call.is_some() && block.successors.is_empty() {
+            return true;
         }
         for &succ in &block.successors {
             if seen.insert(succ) {
@@ -419,5 +474,110 @@ fn call_target(
             },
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(version: SBPFVersion, opc: u8, dst: u8, src: u8, imm: i64) -> Option<CallTarget> {
+        let insn = Insn {
+            ptr: 10,
+            opc,
+            dst,
+            src,
+            off: 0,
+            imm,
+        };
+        call_target(version, &insn, |key| (key == 77).then_some(40))
+    }
+
+    fn block(start: usize, opc: u8, call: Option<CallTarget>, successors: Vec<usize>) -> Block {
+        Block {
+            start,
+            instructions: vec![Instruction {
+                insn: Insn {
+                    ptr: start,
+                    opc,
+                    dst: 0,
+                    src: 0,
+                    off: 0,
+                    imm: 0,
+                },
+                text: String::new(),
+                call,
+            }],
+            successors,
+            noreturn: false,
+        }
+    }
+
+    fn function(entry: usize, blocks: Vec<Block>) -> Function {
+        Function {
+            entry,
+            name: format!("fn_{entry}"),
+            blocks,
+        }
+    }
+
+    /// После возвращающегося вызова сразу начинается другая функция (например, вход
+    /// из `address_taken`): ребра возврата в CFG нет, но функция от этого не становится
+    /// невозвращающейся.
+    #[test]
+    fn returning_call_before_entry() {
+        let call_b = Some(CallTarget::Internal { pc: 2 });
+        let mut functions = vec![
+            function(0, vec![block(0, ebpf::CALL_IMM, call_b.clone(), vec![])]),
+            function(1, vec![block(1, ebpf::EXIT, None, vec![])]),
+            function(2, vec![block(2, ebpf::EXIT, None, vec![])]),
+            function(
+                3,
+                vec![
+                    block(
+                        3,
+                        ebpf::CALL_IMM,
+                        Some(CallTarget::Internal { pc: 0 }),
+                        vec![4],
+                    ),
+                    block(4, ebpf::EXIT, None, vec![]),
+                ],
+            ),
+        ];
+        mark_noreturn(&mut functions);
+        assert!(!functions[0].blocks[0].noreturn);
+        assert!(!functions[3].blocks[0].noreturn);
+    }
+
+    #[test]
+    fn callx_register() {
+        let reg = |reg| Some(CallTarget::Indirect { reg });
+        assert_eq!(call(SBPFVersion::V0, ebpf::CALL_REG, 0, 0, 3), reg(3));
+        assert_eq!(call(SBPFVersion::V3, ebpf::CALL_REG, 3, 0, 0), reg(3));
+    }
+
+    #[test]
+    fn call_imm() {
+        let v3 = |src, imm| call(SBPFVersion::V3, ebpf::CALL_IMM, 0, src, imm);
+        assert_eq!(v3(1, -5), Some(CallTarget::Internal { pc: 6 }));
+        assert_eq!(v3(2, -5), Some(CallTarget::Invalid));
+        assert_eq!(
+            v3(0, 77),
+            Some(CallTarget::Syscall {
+                hash: 77,
+                name: None
+            })
+        );
+        let v0 = |imm| call(SBPFVersion::V0, ebpf::CALL_IMM, 0, 0, imm);
+        assert_eq!(v0(77), Some(CallTarget::Internal { pc: 40 }));
+        let sol_log = ebpf::hash_symbol_name(b"sol_log_");
+        assert_eq!(
+            v0(sol_log.into()),
+            Some(CallTarget::Syscall {
+                hash: sol_log,
+                name: Some("sol_log_")
+            })
+        );
+        assert_eq!(call(SBPFVersion::V0, ebpf::ADD64_IMM, 0, 0, 1), None);
     }
 }

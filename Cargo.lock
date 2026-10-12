@@ -1731,7 +1731,10 @@ dependencies = [
 name = "sbpf-lift"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "rustc-demangle",
+ "serde",
+ "serde_json",
  "solana-sbpf",
  "thiserror 2.0.21",
 ]
