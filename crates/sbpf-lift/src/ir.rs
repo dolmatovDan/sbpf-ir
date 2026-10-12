@@ -39,46 +39,60 @@ impl Width {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    And,
-    Or,
-    Xor,
-    Udiv,
-    Urem,
-    Shl,
-    Lshr,
-    Ashr,
+macro_rules! ops {
+    ($($ty:ident { $($variant:ident = $name:literal),+ $(,)? })+) => {$(
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum $ty {
+            $($variant),+
+        }
+
+        impl $ty {
+            pub const ALL: &[Self] = &[$(Self::$variant),+];
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name),+
+                }
+            }
+        }
+    )+};
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnOp {
-    Neg,
-    Bswap,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtOp {
-    Zext,
-    Sext,
-    Trunc,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CmpOp {
-    Eq,
-    Ne,
-    Ult,
-    Ule,
-    Ugt,
-    Uge,
-    Slt,
-    Sle,
-    Sgt,
-    Sge,
+ops! {
+    BinOp {
+        Add = "add",
+        Sub = "sub",
+        Mul = "mul",
+        And = "and",
+        Or = "or",
+        Xor = "xor",
+        Udiv = "udiv",
+        Urem = "urem",
+        Shl = "shl",
+        Lshr = "lshr",
+        Ashr = "ashr",
+    }
+    UnOp {
+        Neg = "neg",
+        Bswap = "bswap",
+    }
+    ExtOp {
+        Zext = "zext",
+        Sext = "sext",
+        Trunc = "trunc",
+    }
+    CmpOp {
+        Eq = "eq",
+        Ne = "ne",
+        Ult = "ult",
+        Ule = "ule",
+        Ugt = "ugt",
+        Uge = "uge",
+        Slt = "slt",
+        Sle = "sle",
+        Sgt = "sgt",
+        Sge = "sge",
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,91 +133,6 @@ pub enum TypeError {
         from: u32,
         to: u32,
     },
-}
-
-impl BinOp {
-    pub const ALL: [Self; 11] = [
-        BinOp::Add,
-        BinOp::Sub,
-        BinOp::Mul,
-        BinOp::And,
-        BinOp::Or,
-        BinOp::Xor,
-        BinOp::Udiv,
-        BinOp::Urem,
-        BinOp::Shl,
-        BinOp::Lshr,
-        BinOp::Ashr,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            BinOp::Add => "add",
-            BinOp::Sub => "sub",
-            BinOp::Mul => "mul",
-            BinOp::And => "and",
-            BinOp::Or => "or",
-            BinOp::Xor => "xor",
-            BinOp::Udiv => "udiv",
-            BinOp::Urem => "urem",
-            BinOp::Shl => "shl",
-            BinOp::Lshr => "lshr",
-            BinOp::Ashr => "ashr",
-        }
-    }
-}
-
-impl UnOp {
-    pub const ALL: [Self; 2] = [UnOp::Neg, UnOp::Bswap];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            UnOp::Neg => "neg",
-            UnOp::Bswap => "bswap",
-        }
-    }
-}
-
-impl ExtOp {
-    pub const ALL: [Self; 3] = [ExtOp::Zext, ExtOp::Sext, ExtOp::Trunc];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            ExtOp::Zext => "zext",
-            ExtOp::Sext => "sext",
-            ExtOp::Trunc => "trunc",
-        }
-    }
-}
-
-impl CmpOp {
-    pub const ALL: [Self; 10] = [
-        CmpOp::Eq,
-        CmpOp::Ne,
-        CmpOp::Ult,
-        CmpOp::Ule,
-        CmpOp::Ugt,
-        CmpOp::Uge,
-        CmpOp::Slt,
-        CmpOp::Sle,
-        CmpOp::Sgt,
-        CmpOp::Sge,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            CmpOp::Eq => "eq",
-            CmpOp::Ne => "ne",
-            CmpOp::Ult => "ult",
-            CmpOp::Ule => "ule",
-            CmpOp::Ugt => "ugt",
-            CmpOp::Uge => "uge",
-            CmpOp::Slt => "slt",
-            CmpOp::Sle => "sle",
-            CmpOp::Sgt => "sgt",
-            CmpOp::Sge => "sge",
-        }
-    }
 }
 
 impl Expr {

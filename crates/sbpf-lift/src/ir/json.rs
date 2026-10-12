@@ -27,6 +27,7 @@ pub mod hex {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
         let text = String::deserialize(d)?;
         text.strip_prefix("0x")
+            .filter(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_hexdigit()))
             .and_then(|digits| u64::from_str_radix(digits, 16).ok())
             .ok_or_else(|| D::Error::custom(format!("ожидалось 0x…, получено {text:?}")))
     }
@@ -99,41 +100,56 @@ mod opt_hex {
 
 impl<'de> Deserialize<'de> for Expr {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let raw = RawExpr::deserialize(d)?;
-        match raw {
-            RawExpr { reg: Some(r), .. } => Ok(Expr::Reg(r)),
+        match RawExpr::deserialize(d)? {
             RawExpr {
+                reg: Some(r),
+                value: None,
+                w: None,
+                op: None,
+                args: None,
+            } => Ok(Expr::Reg(r)),
+            RawExpr {
+                reg: None,
                 value: Some(value),
                 w: Some(w),
-                ..
+                op: None,
+                args: None,
             } => Ok(Expr::Const { value, w }),
             RawExpr {
+                reg: None,
+                value: None,
+                w,
                 op: Some(op),
                 args: Some(args),
-                w,
-                ..
             } => op_expr(&op, w, args).map_err(D::Error::custom),
-            _ => Err(D::Error::custom("ожидалось reg, const+w или op+args")),
+            _ => Err(D::Error::custom(
+                "ожидалось ровно одно из: reg, const+w, op+args",
+            )),
         }
     }
 }
 
+/// `w` есть только у приведений ширины.
 fn op_expr(name: &str, w: Option<Width>, args: Vec<Expr>) -> Result<Expr, String> {
     let n = args.len();
     let arity = |_| format!("{name}: неверное число аргументов {n}");
-    if let Some(op) = by_name(&BinOp::ALL, name, BinOp::name) {
+    if let Some(op) = by_name(ExtOp::ALL, name, ExtOp::name) {
+        let w = w.ok_or_else(|| format!("{name}: нет поля w"))?;
+        let [a] = <[Expr; 1]>::try_from(args).map_err(arity)?;
+        return Ok(Expr::ext(op, w, a));
+    }
+    if w.is_some() {
+        return Err(format!("{name}: лишнее поле w"));
+    }
+    if let Some(op) = by_name(BinOp::ALL, name, BinOp::name) {
         let [a, b] = <[Expr; 2]>::try_from(args).map_err(arity)?;
         Ok(Expr::bin(op, a, b))
-    } else if let Some(op) = by_name(&CmpOp::ALL, name, CmpOp::name) {
+    } else if let Some(op) = by_name(CmpOp::ALL, name, CmpOp::name) {
         let [a, b] = <[Expr; 2]>::try_from(args).map_err(arity)?;
         Ok(Expr::cmp(op, a, b))
-    } else if let Some(op) = by_name(&UnOp::ALL, name, UnOp::name) {
+    } else if let Some(op) = by_name(UnOp::ALL, name, UnOp::name) {
         let [a] = <[Expr; 1]>::try_from(args).map_err(arity)?;
         Ok(Expr::un(op, a))
-    } else if let Some(op) = by_name(&ExtOp::ALL, name, ExtOp::name) {
-        let [a] = <[Expr; 1]>::try_from(args).map_err(arity)?;
-        let w = w.ok_or_else(|| format!("{name}: нет поля w"))?;
-        Ok(Expr::ext(op, w, a))
     } else {
         Err(format!("неизвестная операция {name:?}"))
     }
@@ -187,6 +203,27 @@ mod tests {
     }
 
     #[test]
+    fn every_op() {
+        let names: Vec<&str> = (BinOp::ALL.iter().map(|op| op.name()))
+            .chain(CmpOp::ALL.iter().map(|op| op.name()))
+            .chain(UnOp::ALL.iter().map(|op| op.name()))
+            .chain(ExtOp::ALL.iter().map(|op| op.name()))
+            .collect();
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len());
+
+        let (a, b) = (|| Expr::reg(1), || Expr::reg(2));
+        let exprs = (BinOp::ALL.iter().map(|&op| Expr::bin(op, a(), b())))
+            .chain(CmpOp::ALL.iter().map(|&op| Expr::cmp(op, a(), b())))
+            .chain(UnOp::ALL.iter().map(|&op| Expr::un(op, a())))
+            .chain(ExtOp::ALL.iter().map(|&op| Expr::ext(op, Width::W64, a())));
+        for e in exprs {
+            let json = serde_json::to_value(&e).unwrap();
+            assert_eq!(serde_json::from_value::<Expr>(json).unwrap(), e);
+        }
+    }
+
+    #[test]
     fn bad_expr() {
         for bad in [
             json!({}),
@@ -196,6 +233,11 @@ mod tests {
             json!({"op": "add", "args": [{"reg": 1}]}),
             json!({"op": "zext", "args": [{"reg": 1}]}),
             json!({"op": "sdiv", "args": [{"reg": 1}, {"reg": 2}]}),
+            json!({"reg": 1, "const": "0x5", "w": 64}),
+            json!({"reg": 1, "op": "add"}),
+            json!({"op": "add", "w": 8, "args": [{"reg": 1}, {"reg": 2}]}),
+            json!({"const": "0x+5", "w": 64}),
+            json!({"const": "0x", "w": 64}),
         ] {
             assert!(
                 serde_json::from_value::<Expr>(bad.clone()).is_err(),
