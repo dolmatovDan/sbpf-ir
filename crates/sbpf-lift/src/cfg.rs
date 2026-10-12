@@ -373,7 +373,8 @@ fn mark_noreturn(functions: &mut [Function]) {
     }
     for block in functions.iter_mut().flat_map(|f| &mut f.blocks) {
         let last = block.instructions.last().unwrap();
-        block.noreturn = last.call.is_some() && !call_returns(&last.call, &returning);
+        block.noreturn = !matches!(last.call, None | Some(CallTarget::Invalid))
+            && !call_returns(&last.call, &returning);
     }
 }
 
