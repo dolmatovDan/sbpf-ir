@@ -421,3 +421,52 @@ fn call_target(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(version: SBPFVersion, opc: u8, dst: u8, src: u8, imm: i64) -> Option<CallTarget> {
+        let insn = Insn {
+            ptr: 10,
+            opc,
+            dst,
+            src,
+            off: 0,
+            imm,
+        };
+        call_target(version, &insn, |key| (key == 77).then_some(40))
+    }
+
+    #[test]
+    fn callx_register() {
+        let reg = |reg| Some(CallTarget::Indirect { reg });
+        assert_eq!(call(SBPFVersion::V0, ebpf::CALL_REG, 0, 0, 3), reg(3));
+        assert_eq!(call(SBPFVersion::V3, ebpf::CALL_REG, 3, 0, 0), reg(3));
+    }
+
+    #[test]
+    fn call_imm() {
+        let v3 = |src, imm| call(SBPFVersion::V3, ebpf::CALL_IMM, 0, src, imm);
+        assert_eq!(v3(1, -5), Some(CallTarget::Internal { pc: 6 }));
+        assert_eq!(v3(2, -5), Some(CallTarget::Invalid));
+        assert_eq!(
+            v3(0, 77),
+            Some(CallTarget::Syscall {
+                hash: 77,
+                name: None
+            })
+        );
+        let v0 = |imm| call(SBPFVersion::V0, ebpf::CALL_IMM, 0, 0, imm);
+        assert_eq!(v0(77), Some(CallTarget::Internal { pc: 40 }));
+        let sol_log = ebpf::hash_symbol_name(b"sol_log_");
+        assert_eq!(
+            v0(sol_log.into()),
+            Some(CallTarget::Syscall {
+                hash: sol_log,
+                name: Some("sol_log_")
+            })
+        );
+        assert_eq!(call(SBPFVersion::V0, ebpf::ADD64_IMM, 0, 0, 1), None);
+    }
+}
