@@ -6,15 +6,121 @@ use solana_sbpf::{
 };
 
 use crate::{
-    CallTarget, Instruction,
+    CallTarget, Cfg, Instruction, Program,
     cfg::jump_target,
-    ir::{BinOp, CmpOp, Exit, Expr, Fault, Stmt, UnOp, Width},
+    ir::{
+        BinOp, Block, CmpOp, Exit, Expr, FORMAT_VERSION, Fault, Function, Module, RoRegion, Stmt,
+        UnOp, Width,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LiftError {
     #[error("pc {pc}: неподдерживаемый опкод {opc:#04x}")]
     UnsupportedOpcode { pc: usize, opc: u8 },
+    #[error("неподдерживаемая версия sBPF: {0:?}")]
+    UnsupportedVersion(SBPFVersion),
+}
+
+pub fn lift(program: &Program, cfg: &Cfg) -> Result<Module, LiftError> {
+    let executable = program.executable();
+    let version = program.version();
+    let sbpf_version = match version {
+        SBPFVersion::V0 => 0,
+        SBPFVersion::V3 => 3,
+        v => return Err(LiftError::UnsupportedVersion(v)),
+    };
+    let (text_vaddr, text) = executable.get_text_bytes();
+    let end = text.len() / ebpf::INSN_SIZE;
+
+    let functions = lift_functions(version, &cfg.functions, end)?;
+    let ro = executable.get_ro_region();
+    let ro_region = RoRegion {
+        vaddr: ro.vm_addr_range().start,
+        data: executable.get_ro_section().to_vec(),
+    };
+    Ok(Module {
+        format_version: FORMAT_VERSION,
+        sbpf_version,
+        entrypoint: cfg.entrypoint,
+        text_vaddr,
+        ro_region,
+        address_taken: cfg.address_taken.clone(),
+        functions,
+    })
+}
+
+/// `end` — число слотов кода. Если управление может провалиться за конец кода,
+/// в последнюю функцию добавляется блок `end` с `trap ExecutionOverrun`.
+fn lift_functions(
+    version: SBPFVersion,
+    cfg_functions: &[crate::Function],
+    end: usize,
+) -> Result<Vec<Function>, LiftError> {
+    let mut functions = Vec::with_capacity(cfg_functions.len());
+    for function in cfg_functions {
+        let blocks = function
+            .blocks
+            .iter()
+            .map(|block| lift_block(version, block, end))
+            .collect::<Result<_, _>>()?;
+        functions.push(Function {
+            entry: function.entry,
+            name: function.name.clone(),
+            blocks,
+        });
+    }
+    let overrun = functions
+        .iter()
+        .flat_map(|f| &f.blocks)
+        .any(|b| match b.exit {
+            Exit::Next { target, .. } => target == end,
+            Exit::Branch { r#else, .. } => r#else == end,
+            _ => false,
+        });
+    if overrun && let Some(last) = functions.last_mut() {
+        last.blocks.push(Block {
+            start: end,
+            noreturn: false,
+            statements: Vec::new(),
+            exit: Exit::Trap {
+                pc: end,
+                error: Fault::ExecutionOverrun,
+            },
+        });
+    }
+    Ok(functions)
+}
+
+fn lift_block(version: SBPFVersion, block: &crate::Block, end: usize) -> Result<Block, LiftError> {
+    let (last, body) = block.instructions.split_last().expect("блок CFG не пуст");
+    let mut statements = Vec::new();
+    for ins in body {
+        statements.extend(lift_stmts(&ins.insn)?);
+    }
+    let after = last.insn.ptr
+        + if last.insn.opc == ebpf::LD_DW_IMM {
+            2
+        } else {
+            1
+        };
+    let next = (after < end).then_some(after);
+    let exit = match lift_exit(version, last, next)? {
+        Some(exit) => exit,
+        None => {
+            statements.extend(lift_stmts(&last.insn)?);
+            Exit::Next {
+                target: after,
+                pc: None,
+            }
+        }
+    };
+    Ok(Block {
+        start: block.start,
+        noreturn: block.noreturn,
+        statements,
+        exit,
+    })
 }
 
 /// Выход блока, который кончается инструкцией `ins`; `None`, если она не передаёт
@@ -679,6 +785,134 @@ mod tests {
                 reg: 3,
                 next: None
             }))
+        );
+    }
+
+    fn cfg_block(start: usize, insns: Vec<Insn>, call: Option<CallTarget>) -> crate::Block {
+        let n = insns.len();
+        crate::Block {
+            start,
+            instructions: insns
+                .into_iter()
+                .enumerate()
+                .map(|(i, insn)| Instruction {
+                    insn,
+                    text: String::new(),
+                    call: if i + 1 == n { call.clone() } else { None },
+                })
+                .collect(),
+            successors: Vec::new(),
+            noreturn: false,
+        }
+    }
+
+    fn at(ptr: usize, opc: u8, imm: i64) -> Insn {
+        Insn {
+            ptr,
+            opc,
+            dst: 1,
+            src: 0,
+            off: 0,
+            imm,
+        }
+    }
+
+    fn function(blocks: Vec<crate::Block>) -> Vec<crate::Function> {
+        vec![crate::Function {
+            entry: 0,
+            name: "f".into(),
+            blocks,
+        }]
+    }
+
+    fn overrun(end: usize) -> Block {
+        Block {
+            start: end,
+            noreturn: false,
+            statements: vec![],
+            exit: Exit::Trap {
+                pc: end,
+                error: Fault::ExecutionOverrun,
+            },
+        }
+    }
+
+    #[test]
+    fn falls_off_the_end() {
+        // mov r1, 1; lddw r1, ... — последняя инструкция занимает слоты 1..=2.
+        let blocks = function(vec![cfg_block(
+            0,
+            vec![at(0, ebpf::MOV64_IMM, 1), at(1, ebpf::LD_DW_IMM, 5)],
+            None,
+        )]);
+        let lifted = lift_functions(SBPFVersion::V3, &blocks, 3).unwrap();
+        let blocks = &lifted[0].blocks;
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0].exit,
+            Exit::Next {
+                target: 3,
+                pc: None
+            }
+        );
+        assert_eq!(blocks[0].statements.len(), 2);
+        assert_eq!(blocks[1], overrun(3));
+    }
+
+    #[test]
+    fn branch_off_the_end() {
+        let mut jeq = at(1, ebpf::JEQ64_IMM, 0);
+        jeq.off = -2;
+        let blocks = function(vec![cfg_block(
+            0,
+            vec![at(0, ebpf::MOV64_IMM, 1), jeq],
+            None,
+        )]);
+        let lifted = lift_functions(SBPFVersion::V0, &blocks, 2).unwrap();
+        assert!(matches!(
+            lifted[0].blocks[0].exit,
+            Exit::Branch {
+                then: 0,
+                r#else: 2,
+                ..
+            }
+        ));
+        assert_eq!(lifted[0].blocks[1], overrun(2));
+    }
+
+    #[test]
+    fn last_call_has_no_next() {
+        let blocks = function(vec![
+            cfg_block(
+                0,
+                vec![at(0, ebpf::CALL_IMM, 0)],
+                Some(CallTarget::Internal { pc: 1 }),
+            ),
+            cfg_block(1, vec![at(1, ebpf::EXIT, 0)], None),
+            cfg_block(
+                2,
+                vec![at(2, ebpf::CALL_REG, 1)],
+                Some(CallTarget::Indirect { reg: 1 }),
+            ),
+        ]);
+        let lifted = lift_functions(SBPFVersion::V0, &blocks, 3).unwrap();
+        let blocks = &lifted[0].blocks;
+        assert_eq!(blocks.len(), 3, "без блока ExecutionOverrun");
+        assert_eq!(
+            blocks[0].exit,
+            Exit::Call {
+                pc: 0,
+                target: 1,
+                next: Some(1)
+            }
+        );
+        assert_eq!(
+            blocks[2].exit,
+            Exit::Callx {
+                pc: 2,
+                reg: 1,
+                next: None
+            }
         );
     }
 

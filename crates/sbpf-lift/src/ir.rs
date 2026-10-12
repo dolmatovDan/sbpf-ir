@@ -113,6 +113,8 @@ pub enum Ty {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
+    #[error("ожидался тип {expected:?}, получено {got:?}")]
+    Unexpected { expected: Ty, got: Ty },
     #[error("нет регистра r{0}")]
     BadReg(u8),
     #[error("константа {value:#x} не помещается в {} бит", w.bits())]
@@ -354,6 +356,108 @@ pub struct Module {
     pub functions: Vec<Function>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct ValidationError(String);
+
+impl Module {
+    /// Структурные инварианты из `docs/ir.md`: типы выражений, уникальные блоки,
+    /// существующие цели переходов и вызовов.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let err = |msg: String| Err(ValidationError(msg));
+        let mut starts = std::collections::BTreeSet::new();
+        for block in self.functions.iter().flat_map(|f| &f.blocks) {
+            if !starts.insert(block.start) {
+                return err(format!("блок {} повторяется", block.start));
+            }
+        }
+        let entries: std::collections::BTreeSet<_> =
+            self.functions.iter().map(|f| f.entry).collect();
+        if !entries.contains(&self.entrypoint) {
+            return err(format!("точка входа {} не вход функции", self.entrypoint));
+        }
+        if let Some(pc) = self.address_taken.iter().find(|pc| !entries.contains(pc)) {
+            return err(format!("address_taken: {pc} не вход функции"));
+        }
+        for function in &self.functions {
+            if function.blocks.first().map(|b| b.start) != Some(function.entry) {
+                return err(format!("функция {} начинается не с entry", function.entry));
+            }
+            for block in &function.blocks {
+                let at = |e: String| ValidationError(format!("блок {}: {e}", block.start));
+                for stmt in &block.statements {
+                    stmt.validate().map_err(at)?;
+                }
+                let targets: Vec<usize> = match &block.exit {
+                    Exit::Next { target, .. } => vec![*target],
+                    Exit::Branch {
+                        cond, then, r#else, ..
+                    } => {
+                        expect_ty(cond, Ty::Bool).map_err(|e| at(e.to_string()))?;
+                        vec![*then, *r#else]
+                    }
+                    Exit::Call { target, next, .. } => {
+                        if !entries.contains(target) {
+                            return err(format!("блок {}: call не в функцию", block.start));
+                        }
+                        next.iter().copied().collect()
+                    }
+                    Exit::Callx { reg, next, .. } => {
+                        if *reg > 10 {
+                            return err(format!("блок {}: нет регистра r{reg}", block.start));
+                        }
+                        next.iter().copied().collect()
+                    }
+                    Exit::Syscall { next, .. } => next.iter().copied().collect(),
+                    Exit::Return { .. } | Exit::Trap { .. } => vec![],
+                };
+                if let Some(pc) = targets.iter().find(|pc| !starts.contains(pc)) {
+                    return err(format!(
+                        "блок {}: переход в несуществующий блок {pc}",
+                        block.start
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Stmt {
+    fn validate(&self) -> Result<(), String> {
+        let dst_ok = |dst: u8| {
+            if dst <= 9 {
+                Ok(())
+            } else {
+                Err(format!("запись в r{dst}"))
+            }
+        };
+        let ty = |e: &Expr, ty| expect_ty(e, ty).map_err(|e| e.to_string());
+        match self {
+            Stmt::Assign { dst, value, .. } => {
+                dst_ok(*dst)?;
+                ty(value, Ty::Bv(Width::W64))
+            }
+            Stmt::Load { dst, addr, .. } => {
+                dst_ok(*dst)?;
+                ty(addr, Ty::Bv(Width::W64))
+            }
+            Stmt::Store { w, addr, value, .. } => {
+                ty(addr, Ty::Bv(Width::W64))?;
+                ty(value, Ty::Bv(*w))
+            }
+            Stmt::Check { cond, .. } => ty(cond, Ty::Bool),
+        }
+    }
+}
+
+fn expect_ty(e: &Expr, expected: Ty) -> Result<(), TypeError> {
+    match e.ty()? {
+        got if got == expected => Ok(()),
+        got => Err(TypeError::Unexpected { expected, got }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BinOp::*, CmpOp::*, ExtOp::*, Width::*, *};
@@ -401,6 +505,112 @@ mod tests {
         ];
         for e in cases {
             assert!(e.ty().is_err(), "{e:?}");
+        }
+    }
+
+    fn module(blocks: Vec<Block>) -> Module {
+        Module {
+            format_version: FORMAT_VERSION,
+            sbpf_version: 3,
+            entrypoint: 0,
+            text_vaddr: 0,
+            ro_region: RoRegion {
+                vaddr: 0,
+                data: vec![],
+            },
+            address_taken: vec![],
+            functions: vec![Function {
+                entry: 0,
+                name: "f".into(),
+                blocks,
+            }],
+        }
+    }
+
+    fn block(start: usize, statements: Vec<Stmt>, exit: Exit) -> Block {
+        Block {
+            start,
+            noreturn: false,
+            statements,
+            exit,
+        }
+    }
+
+    #[test]
+    fn validate() {
+        let ret = |pc| Exit::Return { pc };
+        let ok = module(vec![
+            block(
+                0,
+                vec![Stmt::Check {
+                    pc: 0,
+                    cond: Expr::cmp(Ne, r(1), Expr::c64(0)),
+                    error: Fault::DivideByZero,
+                }],
+                Exit::Next {
+                    target: 1,
+                    pc: None,
+                },
+            ),
+            block(1, vec![], ret(1)),
+        ]);
+        assert_eq!(ok.validate(), Ok(()));
+
+        let bad = [
+            module(vec![block(0, vec![], ret(0)), block(0, vec![], ret(0))]),
+            module(vec![block(
+                0,
+                vec![],
+                Exit::Next {
+                    target: 5,
+                    pc: None,
+                },
+            )]),
+            module(vec![block(
+                0,
+                vec![],
+                Exit::Branch {
+                    pc: 0,
+                    cond: r(1),
+                    then: 0,
+                    r#else: 0,
+                },
+            )]),
+            module(vec![block(
+                0,
+                vec![Stmt::Assign {
+                    pc: 0,
+                    dst: 10,
+                    value: r(1),
+                }],
+                ret(0),
+            )]),
+            module(vec![block(
+                0,
+                vec![Stmt::Store {
+                    pc: 0,
+                    w: W32,
+                    addr: r(1),
+                    value: r(2),
+                }],
+                ret(0),
+            )]),
+            module(vec![block(
+                0,
+                vec![],
+                Exit::Call {
+                    pc: 0,
+                    target: 7,
+                    next: None,
+                },
+            )]),
+            Module {
+                address_taken: vec![3],
+                ..module(vec![block(0, vec![], ret(0))])
+            },
+        ];
+        for m in bad {
+            assert!(m.validate().is_err(), "{m:?}");
         }
     }
 
