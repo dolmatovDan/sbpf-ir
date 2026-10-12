@@ -13,6 +13,7 @@ pub enum LiftError {
 /// Statement'ы инструкции, которая не передаёт управление.
 fn lift_stmts(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
     match insn.opc & ebpf::BPF_CLS_MASK {
+        _ if matches!(insn.opc, ebpf::LE | ebpf::BE) => byte_order(insn),
         ebpf::BPF_ALU64_STORE => alu(insn, Width::W64),
         ebpf::BPF_ALU32_LOAD => alu(insn, Width::W32),
         ebpf::BPF_LD | ebpf::BPF_LDX | ebpf::BPF_ST | ebpf::BPF_STX => memory(insn),
@@ -36,15 +37,6 @@ fn memory(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
             value: Expr::c64(insn.imm as u64),
         }]);
     }
-    if insn.opc & 0xe0 != ebpf::BPF_MEM {
-        return Err(unsupported(insn));
-    }
-    let w = match insn.opc & 0x18 {
-        ebpf::BPF_B => Width::W8,
-        ebpf::BPF_H => Width::W16,
-        ebpf::BPF_W => Width::W32,
-        _ => Width::W64,
-    };
     let addr = |base| {
         Expr::bin(
             BinOp::Add,
@@ -52,61 +44,72 @@ fn memory(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
             Expr::c64(insn.off as i64 as u64),
         )
     };
-    let stmt = match insn.opc & ebpf::BPF_CLS_MASK {
-        ebpf::BPF_LDX => Stmt::Load {
-            pc,
-            dst: insn.dst,
-            w,
-            addr: addr(insn.src),
+    let stx = |w| Stmt::Store {
+        pc,
+        w,
+        addr: addr(insn.dst),
+        value: if w == Width::W64 {
+            Expr::reg(insn.src)
+        } else {
+            Expr::trunc(w, Expr::reg(insn.src))
         },
-        ebpf::BPF_ST => Stmt::Store {
-            pc,
-            w,
-            addr: addr(insn.dst),
-            value: Expr::constant(insn.imm as u64, w),
-        },
-        ebpf::BPF_STX => Stmt::Store {
-            pc,
-            w,
-            addr: addr(insn.dst),
-            value: if w == Width::W64 {
-                Expr::reg(insn.src)
-            } else {
-                Expr::trunc(w, Expr::reg(insn.src))
-            },
-        },
+    };
+    let st = |w| Stmt::Store {
+        pc,
+        w,
+        addr: addr(insn.dst),
+        value: Expr::constant(insn.imm as u64, w),
+    };
+    let ldx = |w| Stmt::Load {
+        pc,
+        dst: insn.dst,
+        w,
+        addr: addr(insn.src),
+    };
+    let stmt = match insn.opc {
+        ebpf::LD_B_REG => ldx(Width::W8),
+        ebpf::LD_H_REG => ldx(Width::W16),
+        ebpf::LD_W_REG => ldx(Width::W32),
+        ebpf::LD_DW_REG => ldx(Width::W64),
+        ebpf::ST_B_IMM => st(Width::W8),
+        ebpf::ST_H_IMM => st(Width::W16),
+        ebpf::ST_W_IMM => st(Width::W32),
+        ebpf::ST_DW_IMM => st(Width::W64),
+        ebpf::ST_B_REG => stx(Width::W8),
+        ebpf::ST_H_REG => stx(Width::W16),
+        ebpf::ST_W_REG => stx(Width::W32),
+        ebpf::ST_DW_REG => stx(Width::W64),
         _ => return Err(unsupported(insn)),
     };
     Ok(vec![stmt])
 }
 
-fn alu(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
-    let pc = insn.ptr;
+fn byte_order(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
     let d = || Expr::reg(insn.dst);
-    let value = match (insn.opc, insn.imm) {
-        (ebpf::LE, 16) => Expr::zext64(Expr::trunc(Width::W16, d())),
-        (ebpf::LE, 32) => Expr::zext64(Expr::lo32(d())),
-        (ebpf::LE, 64) => d(),
-        (ebpf::BE, 16) => Expr::zext64(Expr::un(UnOp::Bswap, Expr::trunc(Width::W16, d()))),
-        (ebpf::BE, 32) => Expr::zext64(Expr::un(UnOp::Bswap, Expr::lo32(d()))),
-        (ebpf::BE, 64) => Expr::un(UnOp::Bswap, d()),
-        (ebpf::LE | ebpf::BE, _) => return Err(unsupported(insn)),
-        _ => return arith(insn, w),
+    let swap = insn.opc == ebpf::BE;
+    let value = match (insn.imm, swap) {
+        (16, false) => Expr::zext64(Expr::trunc(Width::W16, d())),
+        (32, false) => Expr::zext64(Expr::lo32(d())),
+        (64, false) => d(),
+        (16, true) => Expr::zext64(Expr::un(UnOp::Bswap, Expr::trunc(Width::W16, d()))),
+        (32, true) => Expr::zext64(Expr::un(UnOp::Bswap, Expr::lo32(d()))),
+        (64, true) => Expr::un(UnOp::Bswap, d()),
+        _ => return Err(unsupported(insn)),
     };
     Ok(vec![Stmt::Assign {
-        pc,
+        pc: insn.ptr,
         dst: insn.dst,
         value,
     }])
 }
 
-fn arith(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
+fn alu(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
     let pc = insn.ptr;
     let wide = w == Width::W64;
     let narrow = |e| if wide { e } else { Expr::lo32(e) };
     let dst = narrow(Expr::reg(insn.dst));
     let reg_src = insn.opc & ebpf::BPF_X != 0;
-    let src = if reg_src {
+    let mut src = if reg_src {
         narrow(Expr::reg(insn.src))
     } else {
         // `imm` уже знаково расширен до i64 при декодировании.
@@ -114,60 +117,43 @@ fn arith(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
     };
 
     let mut stmts = Vec::new();
-    let mut sign_extend = false;
     let result = match insn.opc & ebpf::BPF_ALU_OP_MASK {
         ebpf::BPF_NEG if !reg_src => Expr::un(UnOp::Neg, dst),
         ebpf::BPF_MOV => src,
         op => {
-            let (op, src) = match op {
-                ebpf::BPF_ADD | ebpf::BPF_SUB | ebpf::BPF_MUL => {
-                    // В v0/v3 результат add32/sub32/mul32 расширяется знаком.
-                    sign_extend = true;
-                    let op = match op {
-                        ebpf::BPF_ADD => BinOp::Add,
-                        ebpf::BPF_SUB => BinOp::Sub,
-                        _ => BinOp::Mul,
-                    };
-                    (op, src)
-                }
-                ebpf::BPF_OR => (BinOp::Or, src),
-                ebpf::BPF_AND => (BinOp::And, src),
-                ebpf::BPF_XOR => (BinOp::Xor, src),
-                ebpf::BPF_DIV | ebpf::BPF_MOD => {
-                    if reg_src {
-                        stmts.push(Stmt::Check {
-                            pc,
-                            cond: Expr::cmp(CmpOp::Ne, src.clone(), Expr::constant(0, w)),
-                            error: Fault::DivideByZero,
-                        });
-                    }
-                    let op = if op == ebpf::BPF_DIV {
-                        BinOp::Udiv
-                    } else {
-                        BinOp::Urem
-                    };
-                    (op, src)
-                }
-                ebpf::BPF_LSH | ebpf::BPF_RSH | ebpf::BPF_ARSH => {
-                    let op = match op {
-                        ebpf::BPF_LSH => BinOp::Shl,
-                        ebpf::BPF_RSH => BinOp::Lshr,
-                        _ => BinOp::Ashr,
-                    };
-                    // Константу сдвига меньше `w` гарантирует верификатор, регистр маскирует VM.
-                    let src = if reg_src {
-                        let mask = Expr::constant((w.bits() - 1).into(), w);
-                        Expr::bin(BinOp::And, src, mask)
-                    } else {
-                        src
-                    };
-                    (op, src)
-                }
+            let op = match op {
+                ebpf::BPF_ADD => BinOp::Add,
+                ebpf::BPF_SUB => BinOp::Sub,
+                ebpf::BPF_MUL => BinOp::Mul,
+                ebpf::BPF_OR => BinOp::Or,
+                ebpf::BPF_AND => BinOp::And,
+                ebpf::BPF_XOR => BinOp::Xor,
+                ebpf::BPF_DIV => BinOp::Udiv,
+                ebpf::BPF_MOD => BinOp::Urem,
+                ebpf::BPF_LSH => BinOp::Shl,
+                ebpf::BPF_RSH => BinOp::Lshr,
+                ebpf::BPF_ARSH => BinOp::Ashr,
                 _ => return Err(unsupported(insn)),
             };
+            if reg_src && matches!(op, BinOp::Udiv | BinOp::Urem) {
+                stmts.push(Stmt::Check {
+                    pc,
+                    cond: Expr::cmp(CmpOp::Ne, src.clone(), Expr::constant(0, w)),
+                    error: Fault::DivideByZero,
+                });
+            }
+            // Константу сдвига меньше `w` гарантирует верификатор, регистр маскирует VM.
+            if reg_src && matches!(op, BinOp::Shl | BinOp::Lshr | BinOp::Ashr) {
+                src = Expr::bin(BinOp::And, src, Expr::constant((w.bits() - 1).into(), w));
+            }
             Expr::bin(op, dst, src)
         }
     };
+    // В v0/v3 результат add32/sub32/mul32 расширяется знаком, остальных — нулями.
+    let sign_extend = matches!(
+        insn.opc & ebpf::BPF_ALU_OP_MASK,
+        ebpf::BPF_ADD | ebpf::BPF_SUB | ebpf::BPF_MUL
+    );
     let value = match (wide, sign_extend) {
         (true, _) => result,
         (false, true) => Expr::sext64(result),
@@ -220,6 +206,10 @@ mod tests {
             assign(Expr::bin(Add, r(1), Expr::c64(u64::MAX))),
         );
         check(
+            insn(ebpf::SUB64_IMM, 1, 0, 0, 5),
+            assign(Expr::bin(Sub, r(1), Expr::c64(5))),
+        );
+        check(
             insn(ebpf::SUB64_REG, 1, 2, 0, 0),
             assign(Expr::bin(Sub, r(1), r(2))),
         );
@@ -256,6 +246,10 @@ mod tests {
                 Expr::lo32(r(1)),
                 Expr::c32(u32::MAX),
             ))),
+        );
+        check(
+            insn(ebpf::SUB32_IMM, 1, 0, 0, 5),
+            assign(Expr::sext64(Expr::bin(Sub, Expr::lo32(r(1)), Expr::c32(5)))),
         );
         check(
             insn(ebpf::MUL32_REG, 1, 2, 0, 0),
