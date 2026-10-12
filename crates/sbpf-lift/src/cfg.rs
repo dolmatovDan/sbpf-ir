@@ -4,8 +4,9 @@
 //! программы там заполняется только из отладочных символов) и теряет ребро
 //! проваливания у первого блока функции.
 //!
-//! Входы функций: точка входа, символы из registry и цели `call`. Функция без
-//! символа, вызываемая только через `callx`, окажется внутри предыдущей.
+//! Входы функций: точка входа, символы из registry, цели `call` и адреса кода,
+//! которые встречаются в программе (кандидаты для `callx`). Функция без символа,
+//! адрес которой вычисляется иначе, окажется внутри предыдущей.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +25,9 @@ pub struct Cfg {
     pub entrypoint: usize,
     /// В порядке адресов; блоки функции идут подряд от её входа до входа следующей.
     pub functions: Vec<Function>,
+    /// Входы, чей адрес встречается как константа `lddw` или как выровненное 8-байтное
+    /// слово read-only региона вне кода.
+    pub address_taken: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -93,8 +97,16 @@ impl Cfg {
         let registry = executable.get_function_registry();
         let entrypoint = executable.get_entrypoint_instruction_offset();
 
-        let insns = decode(executable.get_text_bytes().1);
+        let (text_vaddr, text) = executable.get_text_bytes();
+        let insns = decode(text);
         let starts: BTreeSet<usize> = insns.iter().map(|insn| insn.ptr).collect();
+        let address_taken = address_taken(
+            &insns,
+            &starts,
+            text_vaddr..text_vaddr + text.len() as u64,
+            executable.get_ro_region().vm_addr_range().start,
+            executable.get_ro_section(),
+        );
         let calls: Vec<_> = insns
             .iter()
             .map(|insn| {
@@ -123,6 +135,7 @@ impl Cfg {
         }
         let mut entries: BTreeSet<usize> = names.keys().copied().collect();
         entries.insert(entrypoint);
+        entries.extend(&address_taken);
         entries.extend(calls.iter().filter_map(|call| match call {
             Some(CallTarget::Internal { pc }) => Some(*pc),
             _ => None,
@@ -215,6 +228,7 @@ impl Cfg {
             version,
             entrypoint,
             functions,
+            address_taken,
         }
     }
 
@@ -258,6 +272,42 @@ impl Cfg {
             })
             .collect()
     }
+}
+
+fn address_taken(
+    insns: &[Insn],
+    starts: &BTreeSet<usize>,
+    text: std::ops::Range<u64>,
+    ro_vaddr: u64,
+    ro: &[u8],
+) -> Vec<usize> {
+    let pc_at = |addr: u64| {
+        let offset = addr.checked_sub(text.start)?;
+        if addr >= text.end || offset % ebpf::INSN_SIZE as u64 != 0 {
+            return None;
+        }
+        let pc = (offset / ebpf::INSN_SIZE as u64) as usize;
+        starts.contains(&pc).then_some(pc)
+    };
+    let lddw = insns
+        .iter()
+        .filter(|insn| insn.opc == ebpf::LD_DW_IMM)
+        .map(|insn| insn.imm as u64);
+    let skip = (8 - ro_vaddr % 8) % 8;
+    let words = ro
+        .get(skip as usize..)
+        .unwrap_or_default()
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !text.contains(&(ro_vaddr + skip + 8 * i as u64)))
+        .map(|(_, &word)| u64::from_le_bytes(word));
+    lddw.chain(words)
+        .filter_map(pc_at)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// `lddw` занимает два слота и декодируется в одну инструкцию с 64-битным `imm`.

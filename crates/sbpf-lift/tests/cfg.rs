@@ -343,3 +343,17 @@ fn dot_single_function() {
     assert_eq!(dot.matches("subgraph cluster_").count(), 1);
     assert!(!dot.contains("color=gray"));
 }
+
+/// Адреса кода из `lddw` и read-only данных становятся входами функций, даже без
+/// символов: иначе цели `callx` в stripped-программах оказываются внутри чужих функций.
+#[test]
+fn address_taken_are_entries() {
+    for path in common::all_programs() {
+        let cfg = build(&path);
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(!cfg.address_taken.is_empty(), "{name}");
+        for &pc in &cfg.address_taken {
+            assert!(cfg.function_at(pc).is_some(), "{name}: {pc}");
+        }
+    }
+}
