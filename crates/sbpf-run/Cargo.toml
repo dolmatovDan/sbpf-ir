@@ -1,0 +1,17 @@
+[package]
+name = "sbpf-run"
+description = "Конкретный раннер: исполнение .so через Mollusk на заданной инструкции"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mollusk-svm = { version = "=0.16.1", features = ["register-tracing"] }
+solana-account = "4.3.0"
+solana-instruction = "3.2.0"
+solana-pubkey = { version = "4.1.0", features = ["serde"] }
+solana-sdk-ids = "3.1.0"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
