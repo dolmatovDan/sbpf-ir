@@ -16,6 +16,7 @@ solana-program-runtime = "4.3.0"
 solana-svm-log-collector = "4.3.0"
 solana-transaction-context = "4.3.0"
 hex = "0.4"
+solana-program-error = "3.0.0"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

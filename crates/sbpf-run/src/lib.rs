@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
 
+use mollusk_svm::result::ProgramResult;
 use mollusk_svm::{InvocationInspectCallback, Mollusk};
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_program_error::ProgramError;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_svm_log_collector::LogCollector;
@@ -19,6 +21,18 @@ use solana_transaction_context::instruction_accounts::InstructionAccount;
 
 pub use example::{AccountInput, AccountOutput, Example, ExtraProgram, Outcome, Status};
 pub use mollusk_svm;
+
+/// Встроенные программы Mollusk; `programs` не может их подменить.
+const BUILTINS: [fn() -> Pubkey; 8] = [
+    solana_sdk_ids::system_program::id,
+    solana_sdk_ids::native_loader::id,
+    solana_sdk_ids::bpf_loader_deprecated::id,
+    solana_sdk_ids::bpf_loader::id,
+    solana_sdk_ids::bpf_loader_upgradeable::id,
+    solana_sdk_ids::compute_budget::id,
+    solana_sdk_ids::vote::id,
+    solana_sdk_ids::zk_elgamal_proof_program::id,
+];
 
 /// Лимит транзакции без инструкций ComputeBudget, как у валидатора.
 pub const DEFAULT_COMPUTE_UNIT_LIMIT: u32 = 200_000;
@@ -54,6 +68,8 @@ pub enum RunError {
     NotSo(PathBuf),
     #[error("аккаунт {0} повторяется с разным состоянием")]
     ConflictingAccount(String),
+    #[error("programs[{index}]: {program_id} — это основная или встроенная программа, либо повтор")]
+    ShadowedProgram { index: usize, program_id: String },
     #[error("Mollusk: {0}")]
     Mollusk(String),
 }
@@ -84,6 +100,17 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
             Ok((id, elf))
         })
         .collect::<Result<Vec<_>, RunError>>()?;
+    for (index, (id, _)) in extra.iter().enumerate() {
+        if *id == program_id
+            || BUILTINS.iter().any(|builtin| builtin() == *id)
+            || extra[..index].iter().any(|(other, _)| other == id)
+        {
+            return Err(RunError::ShadowedProgram {
+                index,
+                program_id: id.to_string(),
+            });
+        }
+    }
     let data = from_hex("instruction_data", &example.instruction_data)?;
     let accounts = example
         .accounts
@@ -146,10 +173,14 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
 
     let (status, error) = match &result.raw_result {
         Err(e) => (Status::Failure, Some(format!("{e:?}"))),
-        Ok(()) if !result.program_result.is_ok() => {
-            (Status::Failure, Some("InsufficientFundsForRent".to_owned()))
-        }
-        Ok(()) => (Status::Success, None),
+        Ok(()) => match &result.program_result {
+            ProgramResult::Success => (Status::Success, None),
+            ProgramResult::Failure(ProgramError::AccountNotRentExempt) => {
+                (Status::Failure, Some("InsufficientFundsForRent".to_owned()))
+            }
+            ProgramResult::Failure(e) => (Status::Failure, Some(format!("{e:?}"))),
+            ProgramResult::UnknownError(e) => (Status::Failure, Some(format!("{e:?}"))),
+        },
     };
     let committed = status == Status::Success;
     let trace = traces.take();
@@ -176,7 +207,7 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
             })
             .collect(),
         logs,
-        registers: options.registers.then(|| trace.last().copied()).flatten(),
+        registers: options.registers.then(|| trace.last().copied()),
         trace: options.trace.then_some(trace),
     })
 }

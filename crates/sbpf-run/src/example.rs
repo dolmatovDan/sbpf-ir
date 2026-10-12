@@ -51,7 +51,7 @@ pub struct Outcome {
     pub accounts: Vec<AccountOutput>,
     pub logs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub registers: Option<[u64; 12]>,
+    pub registers: Option<Option<[u64; 12]>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<[u64; 12]>>,
 }

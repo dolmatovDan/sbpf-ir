@@ -1756,6 +1756,7 @@ dependencies = [
  "serde_json",
  "solana-account",
  "solana-instruction 3.5.1",
+ "solana-program-error",
  "solana-program-runtime",
  "solana-pubkey 4.4.0",
  "solana-sdk-ids",

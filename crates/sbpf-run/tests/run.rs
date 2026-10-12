@@ -10,6 +10,10 @@ fn example(name: &str) -> PathBuf {
     examples_dir().join(format!("{name}.json"))
 }
 
+fn load(path: &Path) -> Example {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn outcome(name: &str) -> Outcome {
     run_file(&example(name), Options::default()).unwrap()
 }
@@ -107,7 +111,7 @@ fn anchor_basic() {
 #[test]
 fn input_accounts_unchanged_on_failure() {
     let path = example("native-cpi/transfer-unsigned");
-    let input: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let input = load(&path);
     let o = run_file(&path, Options::default()).unwrap();
     for (before, after) in input.accounts.iter().zip(&o.accounts) {
         assert_eq!(before.key, after.key);
@@ -119,8 +123,7 @@ fn input_accounts_unchanged_on_failure() {
 #[test]
 fn v0_and_v3_agree() {
     for path in all_examples() {
-        let text = std::fs::read_to_string(&path).unwrap();
-        let v0: Example = serde_json::from_str(&text).unwrap();
+        let v0 = load(&path);
         assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
         let mut v3 = v0.clone();
         v3.program = v0.program.replace(".v0.so", ".v3.so");
@@ -144,7 +147,7 @@ fn registers_and_trace() {
     };
     for path in all_examples() {
         let o = run_file(&path, options).unwrap();
-        let registers = o.registers.unwrap();
+        let registers = o.registers.unwrap().unwrap();
         let trace = o.trace.unwrap();
         assert_eq!(trace.last(), Some(&registers), "{}", path.display());
         assert!(trace.len() as u64 <= o.compute_units, "{}", path.display());
@@ -160,7 +163,7 @@ fn registers_and_trace() {
 #[test]
 fn extra_programs_load() {
     let path = example("native-basic/alu64");
-    let mut e: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut e = load(&path);
     e.programs.push(sbpf_run::ExtraProgram {
         program_id: "Cpi1111111111111111111111111111111111111111".into(),
         program: "../../programs/bin/native-cpi.v3.so".into(),
@@ -172,7 +175,7 @@ fn extra_programs_load() {
 #[test]
 fn bad_input() {
     let path = example("native-basic/alu64");
-    let base: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let base = load(&path);
     let dir = path.parent().unwrap();
 
     let mut e = base.clone();
@@ -214,7 +217,7 @@ fn compute_unit_limit() {
     );
 
     let path = example("native-basic/alu64");
-    let mut e: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut e = load(&path);
     e.compute_unit_limit = Some(500);
     let o = run(&e, path.parent().unwrap(), Options::default()).unwrap();
     assert_eq!(o.status, Status::Failure);
@@ -231,7 +234,7 @@ fn compute_unit_limit() {
 #[test]
 fn duplicate_accounts() {
     let path = example("native-cpi/transfer");
-    let base: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let base = load(&path);
     let dir = path.parent().unwrap();
 
     let mut e = base.clone();
@@ -250,4 +253,53 @@ fn duplicate_accounts() {
         run(&e, dir, Options::default()),
         Err(RunError::ConflictingAccount(_))
     ));
+}
+
+#[test]
+fn shadowed_programs_rejected() {
+    let path = example("native-basic/alu64");
+    let base = load(&path);
+    let dir = path.parent().unwrap();
+    for id in [
+        base.program_id.as_str(),
+        "11111111111111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111",
+    ] {
+        let mut e = base.clone();
+        e.programs.push(sbpf_run::ExtraProgram {
+            program_id: id.into(),
+            program: "../../programs/bin/native-cpi.v0.so".into(),
+        });
+        assert!(
+            matches!(
+                run(&e, dir, Options::default()),
+                Err(RunError::ShadowedProgram { index: 0, .. })
+            ),
+            "{id}"
+        );
+    }
+
+    let mut e = base;
+    let extra = sbpf_run::ExtraProgram {
+        program_id: "Cpi1111111111111111111111111111111111111111".into(),
+        program: "../../programs/bin/native-cpi.v0.so".into(),
+    };
+    e.programs = vec![extra.clone(), extra];
+    assert!(matches!(
+        run(&e, dir, Options::default()),
+        Err(RunError::ShadowedProgram { index: 1, .. })
+    ));
+}
+
+#[test]
+fn requested_registers_always_serialized() {
+    let mut o = outcome("native-basic/alu64");
+    let json = serde_json::to_value(&o).unwrap();
+    assert!(json.get("registers").is_none() && json.get("trace").is_none());
+
+    o.registers = Some(None);
+    o.trace = Some(Vec::new());
+    let json = serde_json::to_value(&o).unwrap();
+    assert_eq!(json["registers"], serde_json::Value::Null);
+    assert_eq!(json["trace"], serde_json::json!([]));
 }
