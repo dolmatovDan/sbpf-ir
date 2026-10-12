@@ -15,6 +15,7 @@ fn lift_stmts(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
     match insn.opc & ebpf::BPF_CLS_MASK {
         ebpf::BPF_ALU64_STORE => alu(insn, Width::W64),
         ebpf::BPF_ALU32_LOAD => alu(insn, Width::W32),
+        ebpf::BPF_LD | ebpf::BPF_LDX | ebpf::BPF_ST | ebpf::BPF_STX => memory(insn),
         _ => Err(unsupported(insn)),
     }
 }
@@ -24,6 +25,59 @@ fn unsupported(insn: &Insn) -> LiftError {
         pc: insn.ptr,
         opc: insn.opc,
     }
+}
+
+fn memory(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
+    let pc = insn.ptr;
+    if insn.opc == ebpf::LD_DW_IMM {
+        return Ok(vec![Stmt::Assign {
+            pc,
+            dst: insn.dst,
+            value: Expr::c64(insn.imm as u64),
+        }]);
+    }
+    if insn.opc & 0xe0 != ebpf::BPF_MEM {
+        return Err(unsupported(insn));
+    }
+    let w = match insn.opc & 0x18 {
+        ebpf::BPF_B => Width::W8,
+        ebpf::BPF_H => Width::W16,
+        ebpf::BPF_W => Width::W32,
+        _ => Width::W64,
+    };
+    let addr = |base| {
+        Expr::bin(
+            BinOp::Add,
+            Expr::reg(base),
+            Expr::c64(insn.off as i64 as u64),
+        )
+    };
+    let stmt = match insn.opc & ebpf::BPF_CLS_MASK {
+        ebpf::BPF_LDX => Stmt::Load {
+            pc,
+            dst: insn.dst,
+            w,
+            addr: addr(insn.src),
+        },
+        ebpf::BPF_ST => Stmt::Store {
+            pc,
+            w,
+            addr: addr(insn.dst),
+            value: Expr::constant(insn.imm as u64, w),
+        },
+        ebpf::BPF_STX => Stmt::Store {
+            pc,
+            w,
+            addr: addr(insn.dst),
+            value: if w == Width::W64 {
+                Expr::reg(insn.src)
+            } else {
+                Expr::trunc(w, Expr::reg(insn.src))
+            },
+        },
+        _ => return Err(unsupported(insn)),
+    };
+    Ok(vec![stmt])
 }
 
 fn alu(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
@@ -310,25 +364,100 @@ mod tests {
     }
 
     #[test]
+    fn memory() {
+        let addr = |base, off: i64| Expr::bin(BinOp::Add, r(base), Expr::c64(off as u64));
+        check(
+            insn(ebpf::LD_DW_IMM, 1, 0, 0, 0x1234_5678_9abc_def0),
+            assign(Expr::c64(0x1234_5678_9abc_def0)),
+        );
+        check(
+            insn(ebpf::LD_B_REG, 1, 2, -8, 0),
+            vec![Stmt::Load {
+                pc: 7,
+                dst: 1,
+                w: Width::W8,
+                addr: addr(2, -8),
+            }],
+        );
+        check(
+            insn(ebpf::LD_DW_REG, 1, 2, 16, 0),
+            vec![Stmt::Load {
+                pc: 7,
+                dst: 1,
+                w: Width::W64,
+                addr: addr(2, 16),
+            }],
+        );
+        check(
+            insn(ebpf::ST_H_IMM, 1, 0, 2, -1),
+            vec![Stmt::Store {
+                pc: 7,
+                w: Width::W16,
+                addr: addr(1, 2),
+                value: Expr::constant(0xffff, Width::W16),
+            }],
+        );
+        check(
+            insn(ebpf::ST_DW_IMM, 1, 0, 0, -1),
+            vec![Stmt::Store {
+                pc: 7,
+                w: Width::W64,
+                addr: addr(1, 0),
+                value: Expr::c64(u64::MAX),
+            }],
+        );
+        check(
+            insn(ebpf::ST_W_REG, 1, 2, -4, 0),
+            vec![Stmt::Store {
+                pc: 7,
+                w: Width::W32,
+                addr: addr(1, -4),
+                value: Expr::lo32(r(2)),
+            }],
+        );
+        check(
+            insn(ebpf::ST_DW_REG, 10, 2, -8, 0),
+            vec![Stmt::Store {
+                pc: 7,
+                w: Width::W64,
+                addr: addr(10, -8),
+                value: r(2),
+            }],
+        );
+    }
+
+    #[test]
     fn well_typed_and_rejects_v2() {
         for opc in 0..=u8::MAX {
             let cls = opc & ebpf::BPF_CLS_MASK;
-            if cls != ebpf::BPF_ALU64_STORE && cls != ebpf::BPF_ALU32_LOAD {
+            if cls == ebpf::BPF_JMP64 || cls == ebpf::BPF_JMP32 {
                 continue;
             }
             for imm in [16, 32, 64] {
                 if let Ok(stmts) = lift_stmts(&insn(opc, 1, 2, 0, imm)) {
                     for stmt in stmts {
-                        let (Stmt::Assign { value: e, .. } | Stmt::Check { cond: e, .. }) = &stmt
-                        else {
-                            panic!("{stmt:?}");
+                        let exprs = match &stmt {
+                            Stmt::Assign { value, .. } => vec![value],
+                            Stmt::Check { cond, .. } => vec![cond],
+                            Stmt::Load { addr, .. } => vec![addr],
+                            Stmt::Store { addr, value, .. } => vec![addr, value],
                         };
-                        e.ty().unwrap_or_else(|err| panic!("{opc:#04x}: {err}"));
+                        for e in exprs {
+                            e.ty().unwrap_or_else(|err| panic!("{opc:#04x}: {err}"));
+                        }
                     }
                 }
             }
         }
-        for opc in [ebpf::HOR64_IMM, ebpf::UHMUL64_IMM, ebpf::SDIV64_REG] {
+        for opc in [
+            ebpf::HOR64_IMM,
+            ebpf::UHMUL64_IMM,
+            ebpf::SDIV64_REG,
+            ebpf::BPF_LD | ebpf::BPF_ABS | ebpf::BPF_W,
+            ebpf::BPF_LD | ebpf::BPF_IND | ebpf::BPF_B,
+            ebpf::BPF_LD | ebpf::BPF_MEM | ebpf::BPF_W,
+            ebpf::BPF_LD | ebpf::BPF_IMM | ebpf::BPF_W,
+        ] {
             assert!(lift_stmts(&insn(opc, 1, 2, 0, 0)).is_err(), "{opc:#04x}");
         }
         assert!(matches!(
