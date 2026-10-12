@@ -365,6 +365,12 @@ impl Module {
     /// существующие цели переходов и вызовов.
     pub fn validate(&self) -> Result<(), ValidationError> {
         let err = |msg: String| Err(ValidationError(msg));
+        if self.format_version != FORMAT_VERSION {
+            return err(format!("format_version {}", self.format_version));
+        }
+        if !matches!(self.sbpf_version, 0 | 3) {
+            return err(format!("sbpf_version {}", self.sbpf_version));
+        }
         let mut starts = std::collections::BTreeSet::new();
         for block in self.functions.iter().flat_map(|f| &f.blocks) {
             if !starts.insert(block.start) {
@@ -403,8 +409,8 @@ impl Module {
                         next.iter().copied().collect()
                     }
                     Exit::Callx { reg, next, .. } => {
-                        if *reg > 10 {
-                            return err(format!("блок {}: нет регистра r{reg}", block.start));
+                        if *reg > 9 {
+                            return err(format!("блок {}: callx через r{reg}", block.start));
                         }
                         next.iter().copied().collect()
                     }
@@ -608,6 +614,23 @@ mod tests {
                 address_taken: vec![3],
                 ..module(vec![block(0, vec![], ret(0))])
             },
+            Module {
+                sbpf_version: 2,
+                ..module(vec![block(0, vec![], ret(0))])
+            },
+            Module {
+                format_version: 2,
+                ..module(vec![block(0, vec![], ret(0))])
+            },
+            module(vec![block(
+                0,
+                vec![],
+                Exit::Callx {
+                    pc: 0,
+                    reg: 10,
+                    next: None,
+                },
+            )]),
         ];
         for m in bad {
             assert!(m.validate().is_err(), "{m:?}");

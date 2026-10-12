@@ -8,6 +8,7 @@ use sbpf_lift::{
     Cfg, Program,
     ir::{Exit, Fault, Module, Stmt},
     lift,
+    solana_sbpf::ebpf,
 };
 
 fn lift_file(path: &std::path::Path) -> (Cfg, Module) {
@@ -15,6 +16,12 @@ fn lift_file(path: &std::path::Path) -> (Cfg, Module) {
     let cfg = Cfg::build(&program);
     let module = lift(&program, &cfg).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     (cfg, module)
+}
+
+/// pc за последней инструкцией: начало синтетического блока ExecutionOverrun.
+fn end_pc(cfg: &Cfg) -> usize {
+    let last = &cfg.instructions().last().unwrap().insn;
+    last.ptr + if last.opc == ebpf::LD_DW_IMM { 2 } else { 1 }
 }
 
 fn exit_pc(exit: &Exit) -> Option<usize> {
@@ -37,7 +44,7 @@ fn invariants() {
         module.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(module.entrypoint, cfg.entrypoint, "{name}");
         assert_eq!(module.address_taken, cfg.address_taken, "{name}");
-        let text_len = program_text_len(&path);
+        let end = end_pc(&cfg);
 
         // Одна инструкция — ровно один statement (кроме check) или выход с pc.
         let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
@@ -53,7 +60,7 @@ fn invariants() {
                 Exit::Trap {
                     pc,
                     error: Fault::ExecutionOverrun,
-                } => assert_eq!(pc * 8, text_len, "{name}"),
+                } => assert_eq!(pc, end, "{name}"),
                 ref exit => {
                     if let Some(pc) = exit_pc(exit) {
                         *seen.entry(pc).or_default() += 1;
@@ -71,7 +78,7 @@ fn invariants() {
             .functions
             .iter()
             .flat_map(|f| &f.blocks)
-            .filter(|b| b.start * 8 != text_len)
+            .filter(|b| b.start != end)
             .map(|b| (b.start, b.noreturn))
             .collect();
         assert_eq!(lifted, blocks, "{name}");
@@ -80,11 +87,6 @@ fn invariants() {
         let back: Module = serde_json::from_str(&json).unwrap();
         assert_eq!(back, module, "{name}");
     }
-}
-
-fn program_text_len(path: &std::path::Path) -> usize {
-    let program = Program::load_file(path).unwrap();
-    program.executable().get_text_bytes().1.len()
 }
 
 #[test]
