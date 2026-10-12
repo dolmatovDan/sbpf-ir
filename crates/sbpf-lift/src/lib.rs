@@ -2,6 +2,7 @@
 
 mod cfg;
 mod dot;
+pub mod ir;
 mod load;
 mod syscalls;
 
