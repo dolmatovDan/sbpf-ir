@@ -1,14 +1,14 @@
-//! CLI лифтера: `sbpf-lift cfg <file.so> [--function F] [--dot] [-o FILE]`.
+//! CLI лифтера: `sbpf-lift {cfg | lift | ir} <file.so> ...`.
 
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
 };
 
 use clap::{Parser, Subcommand};
-use sbpf_lift::{Cfg, Function, Program, solana_sbpf::ebpf, write_dot};
+use sbpf_lift::{Cfg, Function, Program, ir, lift, solana_sbpf::ebpf, write_dot, write_ir};
 
 #[derive(Parser)]
 #[command(name = "sbpf-lift", about = "Лифтер sBPF-байткода Solana в IR")]
@@ -32,60 +32,129 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// IR программы в JSON (формат — docs/ir.md).
+    Lift {
+        file: PathBuf,
+        /// С отступами.
+        #[arg(long)]
+        pretty: bool,
+        /// Файл для вывода (по умолчанию stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// IR программы в текстовом виде.
+    Ir {
+        file: PathBuf,
+        /// Только одна функция: имя или pc входа.
+        #[arg(short, long)]
+        function: Option<String>,
+        /// Файл для вывода (по умолчанию stdout).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
-    let Command::Cfg {
-        file,
-        dot,
-        function,
-        output,
-    } = Cli::parse().command;
-    let program = match Program::load_file(&file) {
-        Ok(program) => program,
-        Err(e) => {
-            eprintln!("{}: {e}", file.display());
-            return ExitCode::FAILURE;
-        }
-    };
-    let cfg = Cfg::build(&program);
-    for (pc, hash) in cfg.unknown_syscalls() {
-        eprintln!("предупреждение: pc {pc}: неизвестный syscall {hash:#010x}");
-    }
-    let functions: Vec<&Function> = match &function {
-        None => cfg.functions.iter().collect(),
-        Some(query) => match cfg.find_function(query) {
-            Ok(f) => vec![f],
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::FAILURE;
-            }
-        },
-    };
-
-    let mut out: Box<dyn Write> = match output {
-        Some(path) => match File::create(&path) {
-            Ok(f) => Box::new(BufWriter::new(f)),
-            Err(e) => {
-                eprintln!("{}: {e}", path.display());
-                return ExitCode::FAILURE;
-            }
-        },
-        None => Box::new(BufWriter::new(io::stdout().lock())),
-    };
-    let result = if dot {
-        write_dot(functions, &mut out)
-    } else {
-        print_cfg(&cfg, &functions, &mut out)
-    }
-    .and_then(|()| out.flush());
-    match result {
+    match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn run(command: Command) -> Result<(), String> {
+    match command {
+        Command::Cfg {
+            file,
+            dot,
+            function,
+            output,
+        } => {
+            let (_, cfg) = load(&file)?;
+            let functions = select(&cfg, function.as_deref())?;
+            write_output(output.as_deref(), |w| {
+                if dot {
+                    write_dot(functions, w)
+                } else {
+                    print_cfg(&cfg, &functions, w)
+                }
+            })
+        }
+        Command::Lift {
+            file,
+            pretty,
+            output,
+        } => {
+            let (program, cfg) = load(&file)?;
+            let module = lift_module(&file, &program, &cfg)?;
+            write_output(output.as_deref(), |w| {
+                if pretty {
+                    serde_json::to_writer_pretty(&mut *w, &module)?;
+                } else {
+                    serde_json::to_writer(&mut *w, &module)?;
+                }
+                writeln!(w)
+            })
+        }
+        Command::Ir {
+            file,
+            function,
+            output,
+        } => {
+            let (program, cfg) = load(&file)?;
+            let entries: Vec<usize> = select(&cfg, function.as_deref())?
+                .iter()
+                .map(|f| f.entry)
+                .collect();
+            let module = lift_module(&file, &program, &cfg)?;
+            let functions = module
+                .functions
+                .iter()
+                .filter(|f| entries.binary_search(&f.entry).is_ok());
+            write_output(output.as_deref(), |w| write_ir(&module, functions, w))
+        }
+    }
+}
+
+fn load(file: &Path) -> Result<(Program, Cfg), String> {
+    let program = Program::load_file(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let cfg = Cfg::build(&program);
+    for (pc, hash) in cfg.unknown_syscalls() {
+        eprintln!("предупреждение: pc {pc}: неизвестный syscall {hash:#010x}");
+    }
+    Ok((program, cfg))
+}
+
+fn lift_module(file: &Path, program: &Program, cfg: &Cfg) -> Result<ir::Module, String> {
+    lift(program, cfg).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+fn select<'a>(cfg: &'a Cfg, function: Option<&str>) -> Result<Vec<&'a Function>, String> {
+    match function {
+        None => Ok(cfg.functions.iter().collect()),
+        Some(query) => cfg
+            .find_function(query)
+            .map(|f| vec![f])
+            .map_err(|e| e.to_string()),
+    }
+}
+
+fn write_output(
+    output: Option<&Path>,
+    write: impl FnOnce(&mut Box<dyn Write>) -> io::Result<()>,
+) -> Result<(), String> {
+    let mut out: Box<dyn Write> = match output {
+        Some(path) => Box::new(BufWriter::new(
+            File::create(path).map_err(|e| format!("{}: {e}", path.display()))?,
+        )),
+        None => Box::new(BufWriter::new(io::stdout().lock())),
+    };
+    match write(&mut out).and_then(|()| out.flush()) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(e.to_string()),
     }
 }
 
