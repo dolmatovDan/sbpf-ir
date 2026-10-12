@@ -186,6 +186,7 @@ Syscall читает `r1`–`r5` и пишет `r0`. Остальные реги
 | `and32 d, imm` (и `or`, `xor`) | `d := zext64(and(lo32(d), imm₃₂))` |
 | `div32 d, imm` / `mod32 d, imm` | `d := zext64(udiv(lo32(d), imm₃₂))` / `urem` |
 | `div32 d, s` / `mod32 d, s` | `check ne(lo32(s), 0) DivideByZero`; `d := zext64(udiv(lo32(d), lo32(s)))` / `urem` |
+| `lsh32 d, imm` (и `rsh32`, `arsh32`) | `d := zext64(shl(lo32(d), imm₃₂))` |
 | `lsh32 d, s` (и `rsh32`, `arsh32`) | `d := zext64(shl(lo32(d), and(lo32(s), 31)))` |
 | `neg32 d` | `d := zext64(neg(lo32(d)))` |
 | `mov32 d, imm` / `mov32 d, s` | `d := zext64(imm₃₂)` / `d := zext64(lo32(s))` |
