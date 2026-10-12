@@ -394,6 +394,10 @@ fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
         if !call_returns(&last.call, returning) {
             continue;
         }
+        // Возврат из вызова сразу в другую функцию: ребра в CFG нет, исход неизвестен.
+        if last.call.is_some() && block.successors.is_empty() {
+            return true;
+        }
         for &succ in &block.successors {
             if seen.insert(succ) {
                 stack.push(succ);
@@ -487,6 +491,62 @@ mod tests {
             imm,
         };
         call_target(version, &insn, |key| (key == 77).then_some(40))
+    }
+
+    fn block(start: usize, opc: u8, call: Option<CallTarget>, successors: Vec<usize>) -> Block {
+        Block {
+            start,
+            instructions: vec![Instruction {
+                insn: Insn {
+                    ptr: start,
+                    opc,
+                    dst: 0,
+                    src: 0,
+                    off: 0,
+                    imm: 0,
+                },
+                text: String::new(),
+                call,
+            }],
+            successors,
+            noreturn: false,
+        }
+    }
+
+    fn function(entry: usize, blocks: Vec<Block>) -> Function {
+        Function {
+            entry,
+            name: format!("fn_{entry}"),
+            blocks,
+        }
+    }
+
+    /// После возвращающегося вызова сразу начинается другая функция (например, вход
+    /// из `address_taken`): ребра возврата в CFG нет, но функция от этого не становится
+    /// невозвращающейся.
+    #[test]
+    fn returning_call_before_entry() {
+        let call_b = Some(CallTarget::Internal { pc: 2 });
+        let mut functions = vec![
+            function(0, vec![block(0, ebpf::CALL_IMM, call_b.clone(), vec![])]),
+            function(1, vec![block(1, ebpf::EXIT, None, vec![])]),
+            function(2, vec![block(2, ebpf::EXIT, None, vec![])]),
+            function(
+                3,
+                vec![
+                    block(
+                        3,
+                        ebpf::CALL_IMM,
+                        Some(CallTarget::Internal { pc: 0 }),
+                        vec![4],
+                    ),
+                    block(4, ebpf::EXIT, None, vec![]),
+                ],
+            ),
+        ];
+        mark_noreturn(&mut functions);
+        assert!(!functions[0].blocks[0].noreturn);
+        assert!(!functions[3].blocks[0].noreturn);
     }
 
     #[test]
