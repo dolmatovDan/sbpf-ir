@@ -1748,13 +1748,17 @@ dependencies = [
 name = "sbpf-run"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "mollusk-svm",
  "serde",
  "serde_json",
  "solana-account",
  "solana-instruction 3.5.1",
+ "solana-program-runtime",
  "solana-pubkey 4.4.0",
  "solana-sdk-ids",
+ "solana-svm-log-collector",
+ "solana-transaction-context",
  "thiserror 2.0.21",
 ]
 
