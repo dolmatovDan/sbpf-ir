@@ -1,14 +1,22 @@
 # Примеры
 
-Тестовый контракт `tests/programs/bin/native-basic.v3.so` (исходник — `tests/programs/native-basic`) в трёх видах. Функции, блоки (`bb_<pc>`) и номера инструкций во всех файлах совпадают.
+Пять небольших функций тестового контракта `tests/programs/bin/native-basic.v3.so` (исходник — `tests/programs/native-basic`) в трёх видах. Блоки (`bb_<pc>`) и номера инструкций во всех файлах совпадают.
 
-| Файл | Что это | Как получен |
-|---|---|---|
-| `native-basic.v3.asm` | дизассемблер sBPF, разбитый на функции и блоки CFG | текст инструкций из `Cfg` (`Instruction::text`) |
-| `native-basic.v3.ir` | IR в текстовом виде | `sbpf-lift ir tests/programs/bin/native-basic.v3.so` |
-| `native-basic.v3.json` | IR в JSON — формат для символьной машины (`docs/ir.md`) | `sbpf-lift lift tests/programs/bin/native-basic.v3.so --pretty` |
+| Файл | Что это |
+|---|---|
+| `native-basic.v3.asm` | дизассемблер sBPF, разбитый на блоки CFG |
+| `native-basic.v3.ir` | IR в текстовом виде: `sbpf-lift ir <file.so> -f <функция>` |
+| `native-basic.v3.json` | те же функции в JSON — формат для символьной машины (`docs/ir.md`); полный файл даёт `sbpf-lift lift <file.so>` |
 
-Функция `fn_84` — пример из `docs/ir.md`:
+| Функция | Что показывает |
+|---|---|
+| `fn_76` | знаковые сравнения `jslt`/`jsgt` → `slt`/`sgt` |
+| `fn_84` | деление с явным `check`, `ja`, сохранения разной ширины (пример из `docs/ir.md`) |
+| `fn_173` | 64-битная арифметика, двухслотовый `lddw` |
+| `fn_769` | загрузки и сохранения, `add64 r, -1` со знаково расширенной константой, вызов |
+| `fn_845` | syscall `sol_log_` и невозвращающийся вызов (`noreturn`) |
+
+Функция `fn_84`:
 
 ```
 asm                                IR
@@ -24,7 +32,3 @@ asm                                IR
 91: mov64 r2, 1                    [91] r2 := 1
 92: ja lbb_88                      [92] next → bb_88
 ```
-
-Тот же блок в JSON: `jq '.functions[] | select(.entry == 84)' native-basic.v3.json`.
-
-Файлы сгенерированы и после изменений лифтера могут устареть.
