@@ -11,17 +11,13 @@ use sbpf_lift::{
     solana_sbpf::ebpf,
 };
 
-fn lift_file(path: &std::path::Path) -> (Cfg, Module) {
+/// Третье значение — число слотов кода по длине `.text`, независимо от декодирования в CFG.
+fn lift_file(path: &std::path::Path) -> (Cfg, Module, usize) {
     let program = Program::load_file(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let cfg = Cfg::build(&program);
     let module = lift(&program, &cfg).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    (cfg, module)
-}
-
-/// pc за последней инструкцией: начало синтетического блока ExecutionOverrun.
-fn end_pc(cfg: &Cfg) -> usize {
-    let last = &cfg.instructions().last().unwrap().insn;
-    last.ptr + if last.opc == ebpf::LD_DW_IMM { 2 } else { 1 }
+    let slots = program.executable().get_text_bytes().1.len() / ebpf::INSN_SIZE;
+    (cfg, module, slots)
 }
 
 fn exit_pc(exit: &Exit) -> Option<usize> {
@@ -40,11 +36,10 @@ fn exit_pc(exit: &Exit) -> Option<usize> {
 fn invariants() {
     for path in common::all_programs() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let (cfg, module) = lift_file(&path);
+        let (cfg, module, end) = lift_file(&path);
         module.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(module.entrypoint, cfg.entrypoint, "{name}");
         assert_eq!(module.address_taken, cfg.address_taken, "{name}");
-        let end = end_pc(&cfg);
 
         // Одна инструкция — ровно один statement (кроме check) или выход с pc.
         let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
@@ -91,8 +86,8 @@ fn invariants() {
 
 #[test]
 fn header() {
-    let (_, v0) = lift_file(&common::programs_dir().join("bin/native-basic.v0.so"));
-    let (_, v3) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
+    let (_, v0, _) = lift_file(&common::programs_dir().join("bin/native-basic.v0.so"));
+    let (_, v3, _) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
     assert_eq!((v0.format_version, v0.sbpf_version), (1, 0));
     assert_eq!((v3.format_version, v3.sbpf_version), (1, 3));
     // В v0 код входит в read-only регион, в v3 нет.
@@ -108,7 +103,7 @@ fn header() {
 /// без символов — `fn_<pc>`, поэтому её ищем по коду, а не по имени.
 #[test]
 fn doc_example_text() {
-    let (_, module) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
+    let (_, module, _) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
     let expected = "  bb_84:
     [84] branch eq(r3, 0) → bb_90, bb_85
   bb_85:
@@ -131,8 +126,7 @@ fn doc_example_text() {
         sbpf_lift::write_ir(&module, [function], &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         let body = text.split_once('\n').unwrap().1;
-        let renumbered = renumber(body, function.entry);
-        if renumbered == renumber(expected, 84) {
+        if renumber(body, function.entry) == renumber(expected, 84) {
             found += 1;
         }
     }
@@ -140,6 +134,7 @@ fn doc_example_text() {
 }
 
 /// Сдвигает все pc так, чтобы функция начиналась с 0: пример не зависит от сборки.
+/// pc меньше `base` (переход в более раннюю функцию) превращается в `?`.
 fn renumber(text: &str, base: usize) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -152,7 +147,10 @@ fn renumber(text: &str, base: usize) -> String {
         out.push_str(before);
         let is_pc = before.ends_with('[') || before.ends_with("bb_");
         match digits.parse::<usize>() {
-            Ok(pc) if is_pc => out.push_str(&(pc - base).to_string()),
+            Ok(pc) if is_pc => match pc.checked_sub(base) {
+                Some(pc) => out.push_str(&pc.to_string()),
+                None => out.push('?'),
+            },
             _ => out.push_str(digits),
         }
         rest = after;
