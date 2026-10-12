@@ -20,6 +20,11 @@ use solana_transaction_context::instruction_accounts::InstructionAccount;
 pub use example::{AccountInput, AccountOutput, Example, ExtraProgram, Outcome, Status};
 pub use mollusk_svm;
 
+/// Лимит транзакции без инструкций ComputeBudget, как у валидатора.
+pub const DEFAULT_COMPUTE_UNIT_LIMIT: u32 = 200_000;
+/// Больший лимит валидатор урезает до этого значения.
+pub const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     pub registers: bool,
@@ -47,6 +52,8 @@ pub enum RunError {
     },
     #[error("{0}: путь к программе должен оканчиваться на .so")]
     NotSo(PathBuf),
+    #[error("аккаунт {0} повторяется с разным состоянием")]
+    ConflictingAccount(String),
     #[error("Mollusk: {0}")]
     Mollusk(String),
 }
@@ -72,7 +79,7 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
         .enumerate()
         .map(|(i, p)| {
             let id = pubkey(&format!("programs[{i}].program_id"), &p.program_id)?;
-            let path = base_dir.join(&p.program);
+            let path = so_path(base_dir, &p.program)?;
             let elf = std::fs::read(&path).map_err(|source| RunError::Io { path, source })?;
             Ok((id, elf))
         })
@@ -101,8 +108,12 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
     };
     let mut unique: Vec<(Pubkey, Account)> = Vec::new();
     for (key, account) in &accounts {
-        if !unique.iter().any(|(k, _)| k == key) {
-            unique.push((*key, account.clone()));
+        match unique.iter().find(|(k, _)| k == key) {
+            None => unique.push((*key, account.clone())),
+            Some((_, first)) if first != account => {
+                return Err(RunError::ConflictingAccount(key.to_string()));
+            }
+            Some(_) => {}
         }
     }
 
@@ -121,6 +132,12 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
                 elf,
             );
         }
+        mollusk.compute_budget.compute_unit_limit = example
+            .compute_unit_limit
+            .unwrap_or(DEFAULT_COMPUTE_UNIT_LIMIT)
+            .min(MAX_COMPUTE_UNIT_LIMIT)
+            .into();
+        mollusk.config.panic = false;
         mollusk.logger = Some(logs.clone());
         mollusk.invocation_inspect_callback = Box::new(TopLevelTrace(traces.clone()));
         mollusk.process_instruction(&instruction, &unique)
@@ -128,9 +145,13 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
     .map_err(|payload| RunError::Mollusk(panic_message(payload)))?;
 
     let (status, error) = match &result.raw_result {
-        Ok(()) => (Status::Success, None),
         Err(e) => (Status::Failure, Some(format!("{e:?}"))),
+        Ok(()) if !result.program_result.is_ok() => {
+            (Status::Failure, Some("InsufficientFundsForRent".to_owned()))
+        }
+        Ok(()) => (Status::Success, None),
     };
+    let committed = status == Status::Success;
     let trace = traces.take();
     let logs = logs.borrow().get_recorded_content().to_vec();
     Ok(Outcome {
@@ -141,7 +162,10 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
         accounts: unique
             .iter()
             .map(|(key, input)| {
-                let account = result.get_account(key).unwrap_or(input);
+                let account = result
+                    .get_account(key)
+                    .filter(|_| committed)
+                    .unwrap_or(input);
                 AccountOutput {
                     key: key.to_string(),
                     owner: account.owner.to_string(),
@@ -210,7 +234,7 @@ fn account(index: usize, a: &AccountInput) -> Result<(Pubkey, Account), RunError
             data: from_hex(&field("data"), &a.data)?,
             owner: pubkey(&field("owner"), &a.owner)?,
             executable: a.executable,
-            rent_epoch: 0,
+            rent_epoch: a.rent_epoch.unwrap_or(u64::MAX),
         },
     ))
 }

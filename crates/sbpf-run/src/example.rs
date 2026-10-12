@@ -12,6 +12,8 @@ pub struct Example {
     pub instruction_data: String,
     #[serde(default)]
     pub accounts: Vec<AccountInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compute_unit_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +37,8 @@ pub struct AccountInput {
     pub is_signer: bool,
     #[serde(default)]
     pub is_writable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rent_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

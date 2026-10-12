@@ -17,10 +17,18 @@ fn outcome(name: &str) -> Outcome {
 fn all_examples() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for dir in std::fs::read_dir(examples_dir()).unwrap() {
-        for file in std::fs::read_dir(dir.unwrap().path()).unwrap() {
-            paths.push(file.unwrap().path());
+        let dir = dir.unwrap().path();
+        if !dir.is_dir() {
+            continue;
+        }
+        for file in std::fs::read_dir(dir).unwrap() {
+            let path = file.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                paths.push(path);
+            }
         }
     }
+    assert!(paths.len() >= 17);
     paths.sort();
     paths
 }
@@ -74,6 +82,11 @@ fn native_cpi() {
     assert_eq!(o.status, Status::Success, "{:?}", o.error);
     assert_eq!(lamports(&o), [1_700_000, 1_300_000, 1]);
     assert_eq!(program_logs(&o), ["vault transfer 300000"]);
+
+    let o = outcome("native-cpi/transfer-below-rent");
+    assert_eq!(o.status, Status::Failure);
+    assert_eq!(o.error.as_deref(), Some("InsufficientFundsForRent"));
+    assert_eq!(lamports(&o), [2_000_000, 0, 1]);
 
     assert_failure("native-cpi/transfer-unsigned", "MissingRequiredSignature");
     assert_failure("native-cpi/vault-wrong-seeds", "InvalidSeeds");
@@ -134,6 +147,7 @@ fn registers_and_trace() {
         let registers = o.registers.unwrap();
         let trace = o.trace.unwrap();
         assert_eq!(trace.last(), Some(&registers), "{}", path.display());
+        assert!(trace.len() as u64 <= o.compute_units, "{}", path.display());
         if o.status == Status::Success {
             assert_eq!(registers[0], 0, "{}", path.display());
         }
@@ -187,5 +201,53 @@ fn bad_input() {
     assert!(matches!(
         run(&e, dir, Options::default()),
         Err(RunError::NotSo(_))
+    ));
+}
+
+#[test]
+fn compute_unit_limit() {
+    let o = outcome("native-basic/alu64");
+    assert!(
+        o.logs
+            .iter()
+            .any(|l| l.ends_with(" of 200000 compute units"))
+    );
+
+    let path = example("native-basic/alu64");
+    let mut e: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    e.compute_unit_limit = Some(500);
+    let o = run(&e, path.parent().unwrap(), Options::default()).unwrap();
+    assert_eq!(o.status, Status::Failure);
+    assert_eq!(o.error.as_deref(), Some("ProgramFailedToComplete"));
+    assert!(
+        o.logs
+            .last()
+            .unwrap()
+            .ends_with("exceeded CUs meter at BPF instruction")
+    );
+    assert_eq!(o.compute_units, 500);
+}
+
+#[test]
+fn duplicate_accounts() {
+    let path = example("native-cpi/transfer");
+    let base: Example = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let dir = path.parent().unwrap();
+
+    let mut e = base.clone();
+    let mut alias = e.accounts[0].clone();
+    alias.is_signer = false;
+    e.accounts.push(alias);
+    let o = run(&e, dir, Options::default()).unwrap();
+    assert_eq!(o.status, Status::Success, "{:?}", o.error);
+    assert_eq!(o.accounts.len(), 3);
+
+    let mut e = base;
+    let mut alias = e.accounts[0].clone();
+    alias.lamports += 1;
+    e.accounts.push(alias);
+    assert!(matches!(
+        run(&e, dir, Options::default()),
+        Err(RunError::ConflictingAccount(_))
     ));
 }

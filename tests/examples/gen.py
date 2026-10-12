@@ -3,7 +3,7 @@
 Ключи — base58-строки вида Prefix111…; vault — PDA [b"vault"] программы Cpi111…
 """
 
-import json, struct, sys, os
+import json, struct, os
 A='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 def b58d(s):
     n=0
@@ -41,6 +41,10 @@ def cpi_ex(op, frm, signer, lam):
                         sysacc]}
 w("native-cpi/transfer.json",cpi_ex(0,alice,True,100_000))
 w("native-cpi/transfer-unsigned.json",cpi_ex(0,alice,False,100_000))
+newbie=key('New')
+ex=cpi_ex(0,alice,True,1_000)
+ex["accounts"][1]={"key":newbie,"owner":SYS,"lamports":0,"is_writable":True}
+w("native-cpi/transfer-below-rent.json",ex)
 w("native-cpi/vault-transfer.json",cpi_ex(1,vault,False,300_000))
 w("native-cpi/vault-wrong-seeds.json",cpi_ex(1,alice,False,300_000))
 
