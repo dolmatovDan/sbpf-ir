@@ -1,0 +1,70 @@
+fn_76:
+  bb_76:
+    [76] r0 := 1
+    [77] r3 := 1
+    [78] branch slt(r1, r2) → bb_80, bb_79
+  bb_79:
+    [79] r3 := 0
+    → bb_80
+  bb_80:
+    [80] branch sgt(r1, r2) → bb_82, bb_81
+  bb_81:
+    [81] r0 := 0
+    → bb_82
+  bb_82:
+    [82] r0 := sub(r0, r3)
+    [83] return
+
+fn_84:
+  bb_84:
+    [84] branch eq(r3, 0) → bb_90, bb_85
+  bb_85:
+    [85] check ne(r3, 0) DivideByZero
+    [85] r2 := udiv(r2, r3)
+    [86] store.64 add(r1, 8), r2
+    [87] r2 := 0
+    → bb_88
+  bb_88:
+    [88] store.32 add(r1, 0), trunc32(r2)
+    [89] return
+  bb_90:
+    [90] store.32 add(r1, 4), 23:32
+    [91] r2 := 1
+    [92] next → bb_88
+
+fn_173:
+  bb_173:
+    [173] r0 := r2
+    [174] r0 := add(r0, r1)
+    [175] r0 := mul(r0, 3)
+    [176] r1 := shl(r1, 5)
+    [177] r0 := xor(r0, r1)
+    [178] r1 := 0xfffffffe
+    [180] r2 := and(r2, r1)
+    [181] r2 := lshr(r2, 1)
+    [182] r0 := or(r0, r2)
+    [183] return
+
+fn_769:
+  bb_769:
+    [769] r1 := load.64 add(r1, 0)
+    [770] branch eq(r1, 0xffffffffffffffff) → bb_778, bb_771
+  bb_771:
+    [771] r2 := load.64 add(r1, 8)
+    [772] r2 := add(r2, 0xffffffffffffffff)
+    [773] store.64 add(r1, 8), r2
+    [774] branch ne(r2, 0) → bb_778, bb_775
+  bb_775:
+    [775] r2 := 40
+    [776] r3 := 8
+    [777] call fn_34 → bb_778
+  bb_778:
+    [778] return
+
+fn_845:
+  bb_845:
+    [845] r1 := 200
+    [847] r2 := 46
+    [848] syscall sol_log_ → bb_849
+  bb_849:
+    [849] call fn_850 → bb_850 (noreturn)
