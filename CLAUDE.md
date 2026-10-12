@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Что это
 
-Лифтер байткода смарт-контрактов Solana (sBPF, `.so`-ELF) в собственный IR. Первая часть символьной машины для Solana: здесь только перевод байткода в IR, без модели памяти, солвера и поиска уязвимостей. IR (JSON с версией формата) — контракт с символьной машиной, которая живёт в отдельном проекте на Kotlin, поэтому изменения формата IR ломают потребителя. План работ и статус — чек-лист в `README.md`; формат и семантика IR — `docs/ir.md` (символьная машина строится на usvm, IR подогнан под её `UInterpreter`/`ApplicationGraph`). Сейчас готовы загрузка, CFG и описание IR; типы IR и лифтер ещё не начаты.
+Лифтер байткода смарт-контрактов Solana (sBPF, `.so`-ELF) в собственный IR. Первая часть символьной машины для Solana: здесь только перевод байткода в IR, без модели памяти, солвера и поиска уязвимостей. IR (JSON с версией формата) — контракт с символьной машиной, которая живёт в отдельном проекте на Kotlin, поэтому изменения формата IR ломают потребителя. План работ и статус — чек-лист в `README.md`; формат и семантика IR — `docs/ir.md` (символьная машина строится на usvm, IR подогнан под её `UInterpreter`/`ApplicationGraph`). Сейчас готовы загрузка, CFG, описание IR и конкретный раннер (`sbpf-lift run`, формат — `docs/runner.md`): эталонное исполнение контракта на заданной инструкции, с которым будут сравнивать символьную машину; типы IR и лифтер ещё не начаты.
 
 Конвейер: `.so` → загрузка ELF, релокации, верификация (`solana-sbpf`) → CFG (`cfg.rs`, свой: `static_analysis::Analysis` в v3 не видит функций, а у первого блока функции теряет ребро в следующий блок) → лифтер → IR. Загрузку и декодирование намеренно не переписываем: `solana-sbpf` — тот же код, что исполняет контракты в сети, анализатор должен видеть программу так же, как валидатор.
 
@@ -18,8 +18,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - `syscalls.rs` — список syscall'ов (agave v4.3.0) и загрузчик, в котором они зарегистрированы.
     - `cfg.rs` — `Cfg`: функции, блоки, переходы, цели вызовов, пометка `noreturn`.
     - `dot.rs` — экспорт CFG в Graphviz DOT.
+  - `crates/sbpf-run` — раннер: `run`/`run_file` исполняют пример (`example.rs`: `Example` → `Outcome`) через Mollusk 0.16.1 (agave 4.3).
   - `crates/sbpf-lift-cli` — CLI, бинарь называется `sbpf-lift`.
-- `solana-sbpf` закреплён точно (`=0.23.0`, `default-features = false`, без `jit`) в `[workspace.dependencies]`: та же версия, что в agave 4.3.0, Mollusk и LiteSVM. Менять только вместе с версией agave. Не обновлять и не включать фичи без явной причины.
+- `solana-sbpf` закреплён точно (`=0.23.0`, `default-features = false`) в `[workspace.dependencies]`: та же версия, что в agave 4.3.0, Mollusk и LiteSVM. Менять только вместе с версией agave (и `mollusk-svm`). Не обновлять и не включать фичи без явной причины. Фичу `jit` включает agave через Mollusk, и при сборке воркспейса она объединяется и для `sbpf-lift`; лифтер JIT не вызывает.
+- `tests/examples/<контракт>/*.json` — примеры для раннера, генерирует `tests/examples/gen.py`; все указывают на `.v0.so`, тесты исполняют их и на `.v3.so`.
 - `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного), собирается только через `cargo build-sbf`, не обычным `cargo build`.
   - `native-basic`, `native-cpi`, `anchor-basic` — исходники тестовых контрактов; собранные `.so` лежат в git в `bin/<имя>.<v0|v3>.so`.
   - `mainnet/` — реальные контракты (p-token, ATA, Marinade), все sBPF v0; хеши в `MANIFEST.md`.
@@ -30,6 +32,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `CallTarget::Invalid` — вызов, на котором интерпретатор падает (в v3 `src` не 0/1, либо цель не начало инструкции); у блока нет преемников.
 - `Block::noreturn` — эвристика (из функции не достижим `exit`, либо `abort`/`sol_panic_`). Ребро возврата при этом **не удаляется**: границы функций приблизительны, а удалённое ребро означало бы потерю путей.
 - Входы функций: точка входа, символы и цели `call`. Функция без символа, вызываемая только через `callx`, оказывается внутри предыдущей.
+- Раннер повторяет валидатор, а не умолчания Mollusk: лимит CU 200 000, нарушение ренты — `failure` (`InsufficientFundsForRent`) с исходными аккаунтами, а не паника Mollusk. Трассировку регистров Mollusk включает только в конструкторе `new_debuggable`, который ищет ELF по имени — ему передаётся абсолютный путь без `.so`. Набор фич — `all_enabled`, не мейннет.
+- `docs/runner.md`, как и `docs/ir.md`, — контракт с Kotlin.
 
 ## Команды
 
@@ -43,6 +47,9 @@ cargo fmt
 cargo run -p sbpf-lift-cli -- cfg <file.so>       # функции, блоки, переходы
 cargo run -p sbpf-lift-cli -- cfg <file.so> --dot # то же в Graphviz DOT
 cargo run -p sbpf-lift-cli -- cfg <file.so> -f entrypoint --dot | dot -Tsvg > f.svg  # одна функция (имя или pc)
+cargo run -p sbpf-lift-cli -- run <example.json> [--registers] [--trace]          # исполнить пример через Mollusk
+cargo test -p sbpf-run                            # тесты раннера
+python3 tests/examples/gen.py                     # пересоздать примеры
 
 tests/programs/build.sh [программа ...]           # пересобрать тестовые контракты под v0 и v3
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
