@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - `cfg.rs` — `Cfg`: функции, блоки, переходы, цели вызовов, пометка `noreturn`.
     - `dot.rs` — экспорт CFG в Graphviz DOT.
   - `crates/sbpf-lift-cli` — CLI, бинарь называется `sbpf-lift`.
-- `solana-sbpf` закреплён точно (`=0.25.0`, `default-features = false`, без `jit`) в `[workspace.dependencies]`. Не обновлять и не включать фичи без явной причины.
+- `solana-sbpf` закреплён точно (`=0.23.0`, `default-features = false`, без `jit`) в `[workspace.dependencies]`: та же версия, что в agave 4.3.0, Mollusk и LiteSVM. Менять только вместе с версией agave. Не обновлять и не включать фичи без явной причины.
 - `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного), собирается только через `cargo build-sbf`, не обычным `cargo build`.
   - `native-basic`, `native-cpi`, `anchor-basic` — исходники тестовых контрактов; собранные `.so` лежат в git в `bin/<имя>.<v0|v3>.so`.
   - `mainnet/` — реальные контракты (p-token, ATA, Marinade), все sBPF v0; хеши в `MANIFEST.md`.
