@@ -24,6 +24,84 @@ IR (файл JSON)  →  символьная машина (отдельный �
 - **Лифтер.** Переводит каждую инструкцию sBPF в операции IR, где все неявные особенности записаны явно: расширение результата 32-битных операций (знаком у add/sub/mul, нулями у остальных), двухслотовый `lddw`, деление на ноль, знаковые и беззнаковые сравнения, различия версий sBPF.
 - **IR.** Одна инструкция sBPF — один statement с деревом битвекторных выражений (переводятся в термы KSMT), функции и базовые блоки, переходы — выходами блоков. Сериализуется в JSON с номером версии формата. Этот формат — контракт между лифтером и символьной машиной на базе [usvm](https://github.com/UnitTestBot/usvm), описан в [`docs/ir.md`](docs/ir.md).
 
+## Использование
+
+Все команды — подкоманды одного бинаря `sbpf-lift`. Собрать: `cargo build -p sbpf-lift-cli`, бинарь окажется в `target/debug/sbpf-lift` (или запускать через `cargo run -p sbpf-lift-cli -- …`). Вывод по умолчанию в stdout, `-o FILE` — в файл.
+
+### CFG: функции, блоки, переходы
+
+```sh
+sbpf-lift cfg tests/programs/bin/native-basic.v3.so
+sbpf-lift cfg tests/programs/bin/native-basic.v3.so -f entrypoint --dot | dot -Tsvg > entrypoint.svg
+```
+
+```
+sBPF V3, всего в программе функций: 55, блоков: 615, точка входа: entrypoint (pc 233)
+
+fn fn_0 @ 0
+  lbb_0 [0..=5] -> lbb_6, lbb_7
+  lbb_6 [6..=6] -> lbb_7
+```
+
+`-f` — одна функция по имени или pc входа, `--dot` — граф для Graphviz.
+
+### IR
+
+```sh
+sbpf-lift ir tests/programs/bin/native-basic.v3.so -f entrypoint   # текстом, для чтения
+sbpf-lift lift tests/programs/bin/native-basic.v3.so --pretty       # JSON для символьной машины
+```
+
+```
+entrypoint:
+  bb_233:
+    [233] r2 := r1
+    [234] r1 := r10
+    [235] r1 := add(r1, 0xfffffffffffff000)
+    [236] call fn_378 → bb_237
+```
+
+Операции и формат JSON — [`docs/ir.md`](docs/ir.md), разобранные примеры функций — [`examples/`](examples/README.md).
+
+### Конкретный запуск контракта
+
+`sbpf-lift run` исполняет одну инструкцию контракта так, как её исполнил бы валидатор agave 4.3 (через [Mollusk](https://github.com/anza-xyz/mollusk)): загрузка `.so`, аккаунты, syscall'ы, CPI, учёт CU. Это эталон, с которым сравнивается символьная машина.
+
+Вход — JSON: какой `.so` запустить, аккаунты и байты данных инструкции.
+
+```json
+{
+  "program": "../../programs/bin/native-basic.v0.so",
+  "program_id": "Basic11111111111111111111111111111111111111",
+  "instruction_data": "0007000000000000000300000000000000"
+}
+```
+
+`program` — путь относительно JSON-файла. Смысл байтов `instruction_data` знает только контракт: здесь у `native-basic` это `[операция: 1 байт][a: u64][b: u64]`, то есть `alu64(7, 3)`.
+
+```sh
+sbpf-lift run tests/examples/native-basic/alu64.json
+sbpf-lift run tests/examples/native-basic/alu64.json --registers   # + регистры в конце
+sbpf-lift run tests/examples/native-basic/alu64.json --trace       # + регистры на каждом шаге
+```
+
+```json
+{
+  "status": "success",
+  "compute_units": 781,
+  "return_data": "",
+  "accounts": [],
+  "logs": [
+    "Program Basic11111111111111111111111111111111111111 invoke [1]",
+    "Program log: op 0 -> 2688",
+    "Program Basic11111111111111111111111111111111111111 consumed 781 of 200000 compute units",
+    "Program Basic11111111111111111111111111111111111111 success"
+  ]
+}
+```
+
+Ошибка контракта — `"status": "failure"` и `"error"` (например `tests/examples/native-basic/div-by-zero.json` → `ArithmeticOverflow`). Готовые примеры с аккаунтами, CPI и Anchor — в [`tests/examples/`](tests/examples), полный формат входа и выхода — [`docs/runner.md`](docs/runner.md).
+
 ## Структура
 
 ```
@@ -31,10 +109,14 @@ sbpf-ir/
 ├── Cargo.toml              # Cargo-воркспейс
 ├── crates/
 │   ├── sbpf-lift/          # библиотека: загрузка, CFG, лифтинг, IR
-│   └── sbpf-lift-cli/      # CLI: .so → IR.json, печать IR, экспорт CFG в DOT
+│   ├── sbpf-run/           # раннер: исполнение контракта через Mollusk
+│   └── sbpf-lift-cli/      # CLI: cfg, lift, ir, run
 ├── docs/
-│   └── ir.md               # описание операций IR и формата файла
+│   ├── ir.md               # описание операций IR и формата файла
+│   └── runner.md           # формат входа и выхода раннера
+├── examples/               # разобранные функции native-basic: asm, IR, JSON
 └── tests/
+    ├── examples/           # примеры для раннера (JSON), генерирует gen.py
     └── programs/           # тестовые контракты (отдельный Cargo-воркспейс)
         ├── native-basic/   # нативный Rust: ветвления, ALU 32/64, деление, циклы
         ├── native-cpi/     # нативный Rust: invoke / invoke_signed в System Program
