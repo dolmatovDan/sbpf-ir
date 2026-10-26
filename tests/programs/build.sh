@@ -42,7 +42,8 @@ build_asm() {
         exit 1
     fi
     mkdir -p "$out"
-    "$PLATFORM_TOOLS/rust/bin/rustc" --print target-spec-json -Z unstable-options --target "$triple" > "$out/$triple.json"
+    "$PLATFORM_TOOLS/rust/bin/rustc" --print target-spec-json -Z unstable-options \
+        --target "$triple" > "$out/$triple.json"
     python3 -c '
 import json, sys
 spec = json.load(open(sys.argv[1]))
