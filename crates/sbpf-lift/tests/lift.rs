@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use sbpf_lift::{
     Cfg, Program,
-    ir::{Exit, Fault, Module, Stmt},
+    ir::{Exit, Expr, Fault, Module, Stmt},
     lift,
     solana_sbpf::ebpf,
 };
@@ -81,6 +81,60 @@ fn invariants() {
         let json = serde_json::to_string(&module).unwrap();
         let back: Module = serde_json::from_str(&json).unwrap();
         assert_eq!(back, module, "{name}");
+    }
+}
+
+/// Asm-примеры для первой версии машины: один блок без памяти и вызовов,
+/// регистр читается только после записи, в итоге записаны все r1–r9.
+#[test]
+fn asm_programs_are_straight_line() {
+    let mut count = 0;
+    for path in common::own_programs() {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if !name.starts_with("asm-") {
+            continue;
+        }
+        count += 1;
+        let (_, module, _) = lift_file(&path);
+        let [function] = module.functions.as_slice() else {
+            panic!("{name}: функций {}", module.functions.len());
+        };
+        let [block] = function.blocks.as_slice() else {
+            panic!("{name}: блоков {}", function.blocks.len());
+        };
+        assert!(matches!(block.exit, Exit::Return { .. }), "{name}");
+        let mut written = [false; 11];
+        for stmt in &block.statements {
+            match stmt {
+                Stmt::Assign { dst, value, .. } => {
+                    assert_reads_written(value, &written, &name);
+                    written[*dst as usize] = true;
+                }
+                Stmt::Check {
+                    cond,
+                    error: Fault::DivideByZero,
+                    ..
+                } if name.starts_with("asm-divmod.") => assert_reads_written(cond, &written, &name),
+                other => panic!("{name}: {other:?}"),
+            }
+        }
+        assert!(
+            written[1..10].iter().all(|&w| w),
+            "{name}: записаны не все r1–r9"
+        );
+    }
+    assert_eq!(count, 14, "ожидалось 7 asm-программ × (v0, v3)");
+}
+
+fn assert_reads_written(expr: &Expr, written: &[bool; 11], name: &str) {
+    match expr {
+        Expr::Reg(r) => assert!(written[*r as usize], "{name}: r{r} читается до записи"),
+        Expr::Const { .. } => {}
+        Expr::Un(_, a) | Expr::Ext(_, _, a) => assert_reads_written(a, written, name),
+        Expr::Bin(_, a, b) | Expr::Cmp(_, a, b) => {
+            assert_reads_written(a, written, name);
+            assert_reads_written(b, written, name);
+        }
     }
 }
 

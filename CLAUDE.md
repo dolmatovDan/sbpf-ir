@@ -27,6 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `tests/examples/<контракт>/*.json` — примеры для раннера, генерирует `tests/examples/gen.py`; все указывают на `.v0.so`, тесты исполняют их и на `.v3.so`.
 - `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного), собирается только через `cargo build-sbf`, не обычным `cargo build`.
   - `native-basic`, `native-cpi`, `anchor-basic` — исходники тестовых контрактов; собранные `.so` лежат в git в `bin/<имя>.<v0|v3>.so`.
+  - `asm/<имя>.s` — программы на ассемблере sBPF для первой версии символьной машины: только регистры и арифметика, один блок, регистр читается только после записи, итог в r1–r9 (проверяет `asm_programs_are_straight_line`). `build.sh` собирает их как `asm-<имя>` через clang и ld.lld из platform-tools, линкер-скрипт берётся из target-spec rustc. Мнемоник `le*` в ассемблере LLVM нет — они записаны байтами.
   - `mainnet/` — реальные контракты (p-token, ATA, Marinade), все sBPF v0; хеши в `MANIFEST.md`.
 
 ## Неочевидные решения
@@ -62,7 +63,7 @@ tests/programs/build.sh [программа ...]           # пересобра�
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
 ```
 
-Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 6 файлов в `bin/` (3 программы × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
+Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 20 файлов в `bin/` ((3 контракта + 7 asm) × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` (или `ASM` и счётчик в `asm_programs_are_straight_line`) в `build.sh`. Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
 
 CI (`.github/workflows/ci.yml`) собирает с `RUSTFLAGS=-D warnings` и запускает `cargo fmt --all --check`, `cargo clippy --all-targets --locked`, `cargo test --locked`: любое предупреждение или неформатированный код валит сборку.
 

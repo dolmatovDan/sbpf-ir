@@ -121,7 +121,8 @@ sbpf-ir/
         ├── native-basic/   # нативный Rust: ветвления, ALU 32/64, деление, циклы
         ├── native-cpi/     # нативный Rust: invoke / invoke_signed в System Program
         ├── anchor-basic/   # Anchor: счётчик с constraints
-        ├── build.sh        # сборка под v0 и v3 → bin/<имя>.<v0|v3>.so
+        ├── asm/            # ассемблер sBPF: только регистры и арифметика (для первой версии машины)
+        ├── build.sh        # сборка под v0 и v3 → bin/<имя>.<v0|v3>.so (asm → bin/asm-<имя>.…)
         ├── bin/            # собранные .so (в git)
         └── mainnet/        # контракты из мейннета: dump.sh, programs.txt, MANIFEST.md
 ```
