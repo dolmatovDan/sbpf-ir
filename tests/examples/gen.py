@@ -1,6 +1,10 @@
 """Генерирует примеры раннера: `python3 tests/examples/gen.py`.
 
 Ключи — base58-строки вида Prefix111…; vault — PDA [b"vault"] программы Cpi111…
+
+asm/ — программы из tests/programs/asm для первой версии символьной машины:
+без памяти, вызовов и ветвлений, регистр читается только после записи,
+итог в r1–r9; данных инструкции и аккаунтов нет.
 """
 
 import json, struct, os
@@ -60,3 +64,7 @@ def anchor_ex(count, by, signer_key):
 w("anchor-basic/increment.json",anchor_ex(5,3,auth))
 w("anchor-basic/increment-overflow.json",anchor_ex(2**64-1,1,auth))
 w("anchor-basic/increment-wrong-authority.json",anchor_ex(5,3,other))
+
+asm=key('Asm')
+for name in ["mov","alu64","shift64","alu32","shift32","divmod","endian"]:
+    w(f"asm/{name}.json",{"program":f"../../programs/bin/asm-{name}.v0.so","program_id":asm,"instruction_data":""})

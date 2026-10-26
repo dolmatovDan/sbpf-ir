@@ -25,8 +25,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `crates/sbpf-lift-cli` — CLI, бинарь называется `sbpf-lift`.
 - `solana-sbpf` закреплён точно (`=0.23.0`, `default-features = false`) в `[workspace.dependencies]`: та же версия, что в agave 4.3.0, Mollusk и LiteSVM. Менять только вместе с версией agave (и `mollusk-svm`). Не обновлять и не включать фичи без явной причины. Фичу `jit` включает agave через Mollusk, и при сборке воркспейса она объединяется и для `sbpf-lift`; лифтер JIT не вызывает.
 - `tests/examples/<контракт>/*.json` — примеры для раннера, генерирует `tests/examples/gen.py`; все указывают на `.v0.so`, тесты исполняют их и на `.v3.so`.
-- `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного), собирается только через `cargo build-sbf`, не обычным `cargo build`.
+- `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного): Rust-контракты собираются только через `cargo build-sbf`, не обычным `cargo build`.
   - `native-basic`, `native-cpi`, `anchor-basic` — исходники тестовых контрактов; собранные `.so` лежат в git в `bin/<имя>.<v0|v3>.so`.
+  - `asm/<имя>.s` — программы на ассемблере sBPF для первой версии символьной машины: только регистры и арифметика, один блок, регистр читается только после записи, итог в r1–r9 (проверяет `asm_programs_are_straight_line`). `build.sh` собирает их как `asm-<имя>` через clang и ld.lld из platform-tools, линкер-скрипт берётся из target-spec rustc. Мнемоник `le*` в ассемблере LLVM нет — они записаны байтами.
   - `mainnet/` — реальные контракты (p-token, ATA, Marinade), все sBPF v0; хеши в `MANIFEST.md`.
 
 ## Неочевидные решения
@@ -62,13 +63,14 @@ tests/programs/build.sh [программа ...]           # пересобра�
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
 ```
 
-Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 6 файлов в `bin/` (3 программы × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
+Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 20 файлов в `bin/` ((3 контракта + 7 asm) × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новая asm-программа — ещё `ASM` в `build.sh`, счётчик в `asm_programs_are_straight_line`, список в `gen.py` и ожидаемые регистры в тесте `asm` (`crates/sbpf-run/tests/run.rs`). Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
 
 CI (`.github/workflows/ci.yml`) собирает с `RUSTFLAGS=-D warnings` и запускает `cargo fmt --all --check`, `cargo clippy --all-targets --locked`, `cargo test --locked`: любое предупреждение или неформатированный код валит сборку.
 
 ## Окружение для сборки тестовых контрактов
 
 - Solana CLI (Agave) 4.3.0, platform-tools v1.57. `build.sh` передаёт `--tools-version v1.57` явно: старые platform-tools не знают таргет `sbpfv3`. После сборки скрипт сверяет `e_flags` ELF с версией sBPF.
+- Asm-программы собираются clang, ld.lld и rustc из уже установленных platform-tools (`PLATFORM_TOOLS`, по умолчанию `~/.cache/solana/v1.57/platform-tools`; ставит их первый `cargo build-sbf`), спецификацию таргета разбирает `python3`.
 - Anchor CLI для сборки не нужен (`anchor-basic` собирается `cargo build-sbf`). `avm install`/`avm use` может переключить Solana на 3.1.10 — вернуть: `agave-install init 4.3.0`.
 
 ## Язык

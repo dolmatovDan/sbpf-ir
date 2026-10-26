@@ -352,7 +352,12 @@ fn address_taken_follow_terminators() {
     for path in common::all_programs() {
         let cfg = build(&path);
         let name = path.file_name().unwrap().to_string_lossy();
-        assert!(!cfg.address_taken.is_empty(), "{name}");
+        // В asm-программах адресов кода нет.
+        assert_eq!(
+            cfg.address_taken.is_empty(),
+            name.starts_with("asm-"),
+            "{name}"
+        );
         let insns: Vec<_> = cfg.instructions().map(|i| &i.insn).collect();
         for &pc in &cfg.address_taken {
             let i = insns.iter().position(|insn| insn.ptr == pc).unwrap();

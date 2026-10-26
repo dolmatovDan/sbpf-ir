@@ -14,6 +14,15 @@ fn load(path: &Path) -> Example {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// Пример как есть (`.v0.so`) и тот же пример на `.v3.so`.
+fn v0_and_v3(path: &Path) -> [Example; 2] {
+    let v0 = load(path);
+    assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
+    let mut v3 = v0.clone();
+    v3.program = v0.program.replace(".v0.so", ".v3.so");
+    [v0, v3]
+}
+
 fn outcome(name: &str) -> Outcome {
     run_file(&example(name), Options::default()).unwrap()
 }
@@ -32,7 +41,7 @@ fn all_examples() -> Vec<PathBuf> {
             }
         }
     }
-    assert!(paths.len() >= 17);
+    assert!(paths.len() >= 24);
     paths.sort();
     paths
 }
@@ -108,6 +117,112 @@ fn anchor_basic() {
     assert_failure("anchor-basic/increment-wrong-authority", "Custom(2001)");
 }
 
+/// Итог asm-программ в r1–r9 на v0 и v3; ожидания посчитаны по семантике `docs/ir.md`.
+#[test]
+fn asm() {
+    let options = Options {
+        registers: true,
+        trace: false,
+    };
+    let cases: [(&str, [u64; 9]); 7] = [
+        (
+            "mov",
+            [
+                42,
+                u64::MAX,
+                u64::MAX,
+                0xffffffff,
+                0x8000000000000001,
+                1,
+                0xdeadbeefcafebabe,
+                0xdeadbeefcafebabe,
+                0xcafebabe,
+            ],
+        ),
+        (
+            "alu64",
+            [
+                3,
+                0xfffffffffffffff9,
+                0xffffffffffffffd6,
+                0x200000001,
+                0x200000f01,
+                0xff00ff02ff00ff0e,
+                0xf00,
+                0xffffffffffffedcb,
+                0xfffffffffffffffb,
+            ],
+        ),
+        (
+            "shift64",
+            [
+                0x8000000000000000,
+                0xf800000000000000,
+                0x0800000000000000,
+                70,
+                192,
+                0xfffffffffffffffc,
+                0x03fffffffffffffc,
+                64,
+                0x1234,
+            ],
+        ),
+        (
+            "alu32",
+            [
+                0xffffffff80000000,
+                0xfffffffffffffffe,
+                0xffffffff80000001,
+                0xffffffff80008000,
+                0xfffffffffffff830,
+                0xff1,
+                0x80000000,
+                0x30,
+                0xfffffffb,
+            ],
+        ),
+        (
+            "shift32",
+            [
+                0x80000000,
+                0xf8000000,
+                0x08000000,
+                0x100000024,
+                48,
+                0xfffffff0,
+                0x0ffffff0,
+                0xffffffff00000020,
+                0x1234,
+            ],
+        ),
+        ("divmod", [14, 2, 1, 9, 71, 1, 2, 0x12492491, 89]),
+        (
+            "endian",
+            [
+                0x7788,
+                0x55667788,
+                0x1122334455667788,
+                0x8877,
+                0x88776655,
+                0x8877665544332211,
+                0x0201,
+                0xffffffff,
+                0x3412000000000000,
+            ],
+        ),
+    ];
+    for (name, expected) in cases {
+        let path = example(&format!("asm/{name}"));
+        for e in v0_and_v3(&path) {
+            let o = run(&e, path.parent().unwrap(), options).unwrap();
+            assert_eq!(o.status, Status::Success, "{}: {:?}", e.program, o.error);
+            let registers = o.registers.unwrap().unwrap();
+            assert_eq!(registers[0], 0, "{}", e.program);
+            assert_eq!(registers[1..10], expected, "{}", e.program);
+        }
+    }
+}
+
 #[test]
 fn input_accounts_unchanged_on_failure() {
     let path = example("native-cpi/transfer-unsigned");
@@ -123,10 +238,7 @@ fn input_accounts_unchanged_on_failure() {
 #[test]
 fn v0_and_v3_agree() {
     for path in all_examples() {
-        let v0 = load(&path);
-        assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
-        let mut v3 = v0.clone();
-        v3.program = v0.program.replace(".v0.so", ".v3.so");
+        let [v0, v3] = v0_and_v3(&path);
         let dir = path.parent().unwrap();
         let normalize = |mut o: Outcome| {
             o.compute_units = 0;
