@@ -32,7 +32,7 @@ fn all_examples() -> Vec<PathBuf> {
             }
         }
     }
-    assert!(paths.len() >= 17);
+    assert!(paths.len() >= 24);
     paths.sort();
     paths
 }
@@ -106,6 +106,120 @@ fn anchor_basic() {
 
     assert_failure("anchor-basic/increment-overflow", "Custom(6000)");
     assert_failure("anchor-basic/increment-wrong-authority", "Custom(2001)");
+}
+
+/// Итог asm-программ в r1–r9 на v0 и v3; ожидания посчитаны по семантике `docs/ir.md`.
+#[test]
+fn asm() {
+    let options = Options {
+        registers: true,
+        trace: false,
+    };
+    let cases: [(&str, [u64; 9]); 7] = [
+        (
+            "mov",
+            [
+                42,
+                u64::MAX,
+                u64::MAX,
+                0xffffffff,
+                0x8000000000000001,
+                1,
+                0xdeadbeefcafebabe,
+                0xdeadbeefcafebabe,
+                0xcafebabe,
+            ],
+        ),
+        (
+            "alu64",
+            [
+                3,
+                0xfffffffffffffff9,
+                0xffffffffffffffd6,
+                0x200000001,
+                0x200000f01,
+                0xff00ff02ff00ff0e,
+                0xf00,
+                0xffffffffffffedcb,
+                0xfffffffffffffffb,
+            ],
+        ),
+        (
+            "shift64",
+            [
+                0x8000000000000000,
+                0xf800000000000000,
+                0x0800000000000000,
+                70,
+                192,
+                0xfffffffffffffffc,
+                0x03fffffffffffffc,
+                64,
+                0x1234,
+            ],
+        ),
+        (
+            "alu32",
+            [
+                0xffffffff80000000,
+                0xfffffffffffffffe,
+                1,
+                0xffffffff80008000,
+                0xfffffffffffff830,
+                0xff0,
+                0x80000001,
+                0x7cf,
+                0xfffffffb,
+            ],
+        ),
+        (
+            "shift32",
+            [
+                0x80000000, 0xf8000000, 0x08000000, 36, 48, 0xfffffff0, 0x0ffffff0, 32, 0x1234,
+            ],
+        ),
+        (
+            "divmod",
+            [
+                14,
+                2,
+                0x5555555555555555,
+                9,
+                71,
+                0x55555555,
+                2,
+                0x12492491,
+                2,
+            ],
+        ),
+        (
+            "endian",
+            [
+                0x7788,
+                0x55667788,
+                0x1122334455667788,
+                0x8877,
+                0x88776655,
+                0x8877665544332211,
+                0x0201,
+                0xffffffff,
+                0x3412000000000000,
+            ],
+        ),
+    ];
+    for (name, expected) in cases {
+        let path = example(&format!("asm/{name}"));
+        let v0 = load(&path);
+        let mut v3 = v0.clone();
+        v3.program = v0.program.replace(".v0.so", ".v3.so");
+        for e in [v0, v3] {
+            let o = run(&e, path.parent().unwrap(), options).unwrap();
+            assert_eq!(o.status, Status::Success, "{}: {:?}", e.program, o.error);
+            let registers = o.registers.unwrap().unwrap();
+            assert_eq!(registers[0], 0, "{}", e.program);
+            assert_eq!(registers[1..10], expected, "{}", e.program);
+        }
+    }
 }
 
 #[test]
