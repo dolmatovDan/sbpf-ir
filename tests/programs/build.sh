@@ -30,6 +30,10 @@ build_asm() {
     case "$arch" in
         v0) triple=sbpf-solana-solana cpu=generic ;;
         v3) triple=sbpfv3-solana-solana cpu=v3 ;;
+        *)
+            echo "ошибка: asm-программы собираются только под v0 и v3, а не $arch" >&2
+            exit 1
+            ;;
     esac
     for tool in llvm/bin/clang llvm/bin/ld.lld rust/bin/rustc; do
         if [ ! -x "$PLATFORM_TOOLS/$tool" ]; then
