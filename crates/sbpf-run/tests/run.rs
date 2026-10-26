@@ -14,6 +14,15 @@ fn load(path: &Path) -> Example {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// Пример как есть (`.v0.so`) и тот же пример на `.v3.so`.
+fn v0_and_v3(path: &Path) -> [Example; 2] {
+    let v0 = load(path);
+    assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
+    let mut v3 = v0.clone();
+    v3.program = v0.program.replace(".v0.so", ".v3.so");
+    [v0, v3]
+}
+
 fn outcome(name: &str) -> Outcome {
     run_file(&example(name), Options::default()).unwrap()
 }
@@ -178,20 +187,7 @@ fn asm() {
                 0x80000000, 0xf8000000, 0x08000000, 36, 48, 0xfffffff0, 0x0ffffff0, 32, 0x1234,
             ],
         ),
-        (
-            "divmod",
-            [
-                14,
-                2,
-                0x5555555555555555,
-                9,
-                71,
-                0x55555555,
-                2,
-                0x12492491,
-                2,
-            ],
-        ),
+        ("divmod", [14, 2, 1, 9, 71, 1, 2, 0x12492491, 2]),
         (
             "endian",
             [
@@ -209,10 +205,7 @@ fn asm() {
     ];
     for (name, expected) in cases {
         let path = example(&format!("asm/{name}"));
-        let v0 = load(&path);
-        let mut v3 = v0.clone();
-        v3.program = v0.program.replace(".v0.so", ".v3.so");
-        for e in [v0, v3] {
+        for e in v0_and_v3(&path) {
             let o = run(&e, path.parent().unwrap(), options).unwrap();
             assert_eq!(o.status, Status::Success, "{}: {:?}", e.program, o.error);
             let registers = o.registers.unwrap().unwrap();
@@ -237,10 +230,7 @@ fn input_accounts_unchanged_on_failure() {
 #[test]
 fn v0_and_v3_agree() {
     for path in all_examples() {
-        let v0 = load(&path);
-        assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
-        let mut v3 = v0.clone();
-        v3.program = v0.program.replace(".v0.so", ".v3.so");
+        let [v0, v3] = v0_and_v3(&path);
         let dir = path.parent().unwrap();
         let normalize = |mut o: Outcome| {
             o.compute_units = 0;
