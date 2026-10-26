@@ -353,8 +353,9 @@ fn address_taken_follow_terminators() {
         let cfg = build(&path);
         let name = path.file_name().unwrap().to_string_lossy();
         // В asm-программах адресов кода нет.
-        assert!(
-            name.starts_with("asm-") || !cfg.address_taken.is_empty(),
+        assert_eq!(
+            cfg.address_taken.is_empty(),
+            name.starts_with("asm-"),
             "{name}"
         );
         let insns: Vec<_> = cfg.instructions().map(|i| &i.insn).collect();

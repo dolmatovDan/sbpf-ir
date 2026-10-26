@@ -13,10 +13,14 @@ entrypoint:
   mul32 w5, w2
   lddw r6, 0xffffffff0000ffff
   and32 w6, 0x0ff0
+  or32 w6, w3
+  sub32 w3, w1
   mov32 w7, 1
   or32 w7, -2147483648
+  and32 w7, w4
   mov32 w8, -1
   xor32 w8, w5
+  xor32 w8, 0x7ff
   mov32 w9, 5
   neg32 w9
   mov64 r0, 0

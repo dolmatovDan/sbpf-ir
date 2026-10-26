@@ -23,22 +23,37 @@ e_flags() {
     od -An -t u4 -j 48 -N 4 "$1" | tr -d ' '
 }
 
-# Линкер-скрипт и флаги — как у rustc из platform-tools для таргета этой версии.
+# Линкер-скрипт и флаги линковки — из спецификации таргета rustc в platform-tools.
 build_asm() {
-    local src="$1" arch="$2" dst="$3" out="out/$arch" triple cpu
+    local src="$1" arch="$2" dst="$3"
+    local out="out/$arch" triple cpu tool arg args=()
     case "$arch" in
         v0) triple=sbpf-solana-solana cpu=generic ;;
         v3) triple=sbpfv3-solana-solana cpu=v3 ;;
     esac
-    if [ ! -x "$PLATFORM_TOOLS/llvm/bin/clang" ]; then
-        echo "ошибка: нет platform-tools в $PLATFORM_TOOLS (поставить: собрать любой Rust-контракт этим скриптом)" >&2
+    for tool in llvm/bin/clang llvm/bin/ld.lld rust/bin/rustc; do
+        if [ ! -x "$PLATFORM_TOOLS/$tool" ]; then
+            echo "ошибка: нет $PLATFORM_TOOLS/$tool (platform-tools ставит cargo build-sbf: собрать этим скриптом любой Rust-контракт)" >&2
+            exit 1
+        fi
+    done
+    if ! command -v python3 > /dev/null; then
+        echo "ошибка: для сборки asm нужен python3" >&2
         exit 1
     fi
     mkdir -p "$out"
-    "$PLATFORM_TOOLS/rust/bin/rustc" --print target-spec-json -Z unstable-options --target "$triple" |
-        python3 -c 'import json, sys; print(json.load(sys.stdin)["link-script"])' > "$out/$triple.ld"
+    "$PLATFORM_TOOLS/rust/bin/rustc" --print target-spec-json -Z unstable-options --target "$triple" > "$out/$triple.json"
+    python3 -c '
+import json, sys
+spec = json.load(open(sys.argv[1]))
+open(sys.argv[2], "w").write(spec["link-script"])
+print("\n".join(spec["pre-link-args"]["gnu-lld"]))
+' "$out/$triple.json" "$out/$triple.ld" > "$out/$triple.args"
+    while IFS= read -r arg; do
+        args+=("$arg")
+    done < "$out/$triple.args"
     "$PLATFORM_TOOLS/llvm/bin/clang" --target=sbf -mcpu="$cpu" -c "$src" -o "$out/asm.o"
-    "$PLATFORM_TOOLS/llvm/bin/ld.lld" -z notext --Bdynamic -shared -e entrypoint \
+    "$PLATFORM_TOOLS/llvm/bin/ld.lld" "${args[@]}" -shared -e entrypoint \
         -T "$out/$triple.ld" "$out/asm.o" -o "$dst"
 }
 

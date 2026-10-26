@@ -70,6 +70,7 @@ CI (`.github/workflows/ci.yml`) собирает с `RUSTFLAGS=-D warnings` и �
 ## Окружение для сборки тестовых контрактов
 
 - Solana CLI (Agave) 4.3.0, platform-tools v1.57. `build.sh` передаёт `--tools-version v1.57` явно: старые platform-tools не знают таргет `sbpfv3`. После сборки скрипт сверяет `e_flags` ELF с версией sBPF.
+- Asm-программы собираются clang, ld.lld и rustc из уже установленных platform-tools (`PLATFORM_TOOLS`, по умолчанию `~/.cache/solana/v1.57/platform-tools`; ставит их первый `cargo build-sbf`), спецификацию таргета разбирает `python3`.
 - Anchor CLI для сборки не нужен (`anchor-basic` собирается `cargo build-sbf`). `avm install`/`avm use` может переключить Solana на 3.1.10 — вернуть: `agave-install init 4.3.0`.
 
 ## Язык
