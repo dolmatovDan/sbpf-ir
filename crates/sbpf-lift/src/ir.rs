@@ -254,7 +254,7 @@ pub enum Fault {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Assign {
         pc: usize,

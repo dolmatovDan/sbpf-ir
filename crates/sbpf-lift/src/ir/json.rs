@@ -53,106 +53,96 @@ impl Serialize for Expr {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(None)?;
         match self {
-            Expr::Reg(r) => map.serialize_entry("reg", r)?,
+            Expr::Reg(r) => {
+                map.serialize_entry("kind", "reg")?;
+                map.serialize_entry("reg", r)?;
+            }
             Expr::Const { value, w } => {
-                map.serialize_entry("const", &format!("{value:#x}"))?;
+                map.serialize_entry("kind", "const")?;
+                map.serialize_entry("value", &format!("{value:#x}"))?;
                 map.serialize_entry("w", w)?;
             }
             Expr::Bin(op, a, b) => {
+                map.serialize_entry("kind", "bin")?;
                 map.serialize_entry("op", op.name())?;
-                map.serialize_entry("args", &[a, b])?;
+                map.serialize_entry("a", a)?;
+                map.serialize_entry("b", b)?;
             }
             Expr::Cmp(op, a, b) => {
+                map.serialize_entry("kind", "cmp")?;
                 map.serialize_entry("op", op.name())?;
-                map.serialize_entry("args", &[a, b])?;
+                map.serialize_entry("a", a)?;
+                map.serialize_entry("b", b)?;
             }
             Expr::Un(op, a) => {
+                map.serialize_entry("kind", "un")?;
                 map.serialize_entry("op", op.name())?;
-                map.serialize_entry("args", &[a])?;
+                map.serialize_entry("a", a)?;
             }
             Expr::Ext(op, w, a) => {
+                map.serialize_entry("kind", "ext")?;
                 map.serialize_entry("op", op.name())?;
                 map.serialize_entry("w", w)?;
-                map.serialize_entry("args", &[a])?;
+                map.serialize_entry("a", a)?;
             }
         }
         map.end()
     }
 }
 
+/// `kind` задаёт поля узла, `op` — операцию внутри вида.
 #[derive(Deserialize)]
-struct RawExpr {
-    reg: Option<u8>,
-    #[serde(rename = "const", default, with = "opt_hex")]
-    value: Option<u64>,
-    w: Option<Width>,
-    op: Option<String>,
-    args: Option<Vec<Expr>>,
-}
-
-mod opt_hex {
-    use super::*;
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
-        hex::deserialize(d).map(Some)
-    }
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RawExpr {
+    Reg {
+        reg: u8,
+    },
+    Const {
+        #[serde(with = "hex")]
+        value: u64,
+        w: Width,
+    },
+    Bin {
+        op: String,
+        a: Box<Expr>,
+        b: Box<Expr>,
+    },
+    Un {
+        op: String,
+        a: Box<Expr>,
+    },
+    Ext {
+        op: String,
+        w: Width,
+        a: Box<Expr>,
+    },
+    Cmp {
+        op: String,
+        a: Box<Expr>,
+        b: Box<Expr>,
+    },
 }
 
 impl<'de> Deserialize<'de> for Expr {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match RawExpr::deserialize(d)? {
-            RawExpr {
-                reg: Some(r),
-                value: None,
-                w: None,
-                op: None,
-                args: None,
-            } => Ok(Expr::Reg(r)),
-            RawExpr {
-                reg: None,
-                value: Some(value),
-                w: Some(w),
-                op: None,
-                args: None,
-            } => Ok(Expr::Const { value, w }),
-            RawExpr {
-                reg: None,
-                value: None,
-                w,
-                op: Some(op),
-                args: Some(args),
-            } => op_expr(&op, w, args).map_err(D::Error::custom),
-            _ => Err(D::Error::custom(
-                "ожидалось ровно одно из: reg, const+w, op+args",
-            )),
-        }
+        Ok(match RawExpr::deserialize(d)? {
+            RawExpr::Reg { reg } => Expr::Reg(reg),
+            RawExpr::Const { value, w } => Expr::Const { value, w },
+            RawExpr::Bin { op, a, b } => Expr::Bin(parse_op(BinOp::ALL, &op, BinOp::name)?, a, b),
+            RawExpr::Un { op, a } => Expr::Un(parse_op(UnOp::ALL, &op, UnOp::name)?, a),
+            RawExpr::Ext { op, w, a } => Expr::Ext(parse_op(ExtOp::ALL, &op, ExtOp::name)?, w, a),
+            RawExpr::Cmp { op, a, b } => Expr::Cmp(parse_op(CmpOp::ALL, &op, CmpOp::name)?, a, b),
+        })
     }
 }
 
-/// `w` есть только у приведений ширины.
-fn op_expr(name: &str, w: Option<Width>, args: Vec<Expr>) -> Result<Expr, String> {
-    let n = args.len();
-    let arity = |_| format!("{name}: неверное число аргументов {n}");
-    if let Some(op) = by_name(ExtOp::ALL, name, ExtOp::name) {
-        let w = w.ok_or_else(|| format!("{name}: нет поля w"))?;
-        let [a] = <[Expr; 1]>::try_from(args).map_err(arity)?;
-        return Ok(Expr::ext(op, w, a));
-    }
-    if w.is_some() {
-        return Err(format!("{name}: лишнее поле w"));
-    }
-    if let Some(op) = by_name(BinOp::ALL, name, BinOp::name) {
-        let [a, b] = <[Expr; 2]>::try_from(args).map_err(arity)?;
-        Ok(Expr::bin(op, a, b))
-    } else if let Some(op) = by_name(CmpOp::ALL, name, CmpOp::name) {
-        let [a, b] = <[Expr; 2]>::try_from(args).map_err(arity)?;
-        Ok(Expr::cmp(op, a, b))
-    } else if let Some(op) = by_name(UnOp::ALL, name, UnOp::name) {
-        let [a] = <[Expr; 1]>::try_from(args).map_err(arity)?;
-        Ok(Expr::un(op, a))
-    } else {
-        Err(format!("неизвестная операция {name:?}"))
-    }
+/// Имя ищется только среди операций своего вида: `{"kind": "bin", "op": "eq"}` — ошибка.
+fn parse_op<T: Copy, E: serde::de::Error>(
+    all: &[T],
+    name: &str,
+    op_name: fn(T) -> &'static str,
+) -> Result<T, E> {
+    by_name(all, name, op_name).ok_or_else(|| E::custom(format!("неизвестная операция {name:?}")))
 }
 
 fn by_name<T: Copy>(all: &[T], name: &str, op_name: fn(T) -> &'static str) -> Option<T> {
@@ -176,29 +166,34 @@ mod tests {
     #[test]
     fn expr() {
         let r = Expr::reg;
-        roundtrip(&r(3), json!({"reg": 3}));
+        roundtrip(&r(3), json!({"kind": "reg", "reg": 3}));
         roundtrip(
             &Expr::constant(u64::MAX, Width::W64),
-            json!({"const": "0xffffffffffffffff", "w": 64}),
+            json!({"kind": "const", "value": "0xffffffffffffffff", "w": 64}),
         );
-        roundtrip(&Expr::c32(5), json!({"const": "0x5", "w": 32}));
+        roundtrip(
+            &Expr::c32(5),
+            json!({"kind": "const", "value": "0x5", "w": 32}),
+        );
         roundtrip(
             &Expr::bin(BinOp::Lshr, r(1), r(2)),
-            json!({"op": "lshr", "args": [{"reg": 1}, {"reg": 2}]}),
+            json!({"kind": "bin", "op": "lshr",
+                "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
         );
         roundtrip(
             &Expr::cmp(CmpOp::Sge, r(1), r(2)),
-            json!({"op": "sge", "args": [{"reg": 1}, {"reg": 2}]}),
+            json!({"kind": "cmp", "op": "sge",
+                "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
         );
         roundtrip(
             &Expr::un(UnOp::Bswap, r(1)),
-            json!({"op": "bswap", "args": [{"reg": 1}]}),
+            json!({"kind": "un", "op": "bswap", "a": {"kind": "reg", "reg": 1}}),
         );
         roundtrip(
             &Expr::sext64(Expr::lo32(r(1))),
-            json!({"op": "sext", "w": 64, "args": [
-                {"op": "trunc", "w": 32, "args": [{"reg": 1}]}
-            ]}),
+            json!({"kind": "ext", "op": "sext", "w": 64, "a":
+                {"kind": "ext", "op": "trunc", "w": 32, "a": {"kind": "reg", "reg": 1}}
+            }),
         );
     }
 
@@ -227,17 +222,22 @@ mod tests {
     fn bad_expr() {
         for bad in [
             json!({}),
-            json!({"const": "5", "w": 64}),
-            json!({"const": "0x5", "w": 7}),
-            json!({"const": "0x5"}),
-            json!({"op": "add", "args": [{"reg": 1}]}),
-            json!({"op": "zext", "args": [{"reg": 1}]}),
-            json!({"op": "sdiv", "args": [{"reg": 1}, {"reg": 2}]}),
-            json!({"reg": 1, "const": "0x5", "w": 64}),
-            json!({"reg": 1, "op": "add"}),
-            json!({"op": "add", "w": 8, "args": [{"reg": 1}, {"reg": 2}]}),
-            json!({"const": "0x+5", "w": 64}),
-            json!({"const": "0x", "w": 64}),
+            json!({"reg": 1}),
+            json!({"kind": "vec", "reg": 1}),
+            json!({"kind": "reg"}),
+            json!({"kind": "const", "value": "5", "w": 64}),
+            json!({"kind": "const", "value": "0x5", "w": 7}),
+            json!({"kind": "const", "value": "0x5"}),
+            json!({"kind": "const", "value": "0x+5", "w": 64}),
+            json!({"kind": "const", "value": "0x", "w": 64}),
+            json!({"kind": "bin", "op": "add", "a": {"kind": "reg", "reg": 1}}),
+            json!({"kind": "ext", "op": "zext", "a": {"kind": "reg", "reg": 1}}),
+            json!({"kind": "bin", "op": "sdiv",
+                "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
+            // Операция чужого вида.
+            json!({"kind": "bin", "op": "eq",
+                "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
+            json!({"kind": "un", "op": "zext", "a": {"kind": "reg", "reg": 1}}),
         ] {
             assert!(
                 serde_json::from_value::<Expr>(bad.clone()).is_err(),
@@ -270,7 +270,8 @@ mod tests {
                 r#else: 85,
             },
             json!({"kind": "branch", "pc": 84, "then": 90, "else": 85, "cond":
-                {"op": "eq", "args": [{"reg": 3}, {"const": "0x0", "w": 64}]}}),
+                {"kind": "cmp", "op": "eq", "a": {"kind": "reg", "reg": 3},
+                    "b": {"kind": "const", "value": "0x0", "w": 64}}}),
         );
         roundtrip(
             &Exit::Call {
@@ -305,14 +306,17 @@ mod tests {
           "start": 85,
           "noreturn": false,
           "statements": [
-            { "pc": 85, "op": "check", "error": "DivideByZero",
-              "cond": { "op": "ne", "args": [{ "reg": 3 }, { "const": "0x0", "w": 64 }] } },
-            { "pc": 85, "op": "assign", "dst": 2,
-              "value": { "op": "udiv", "args": [{ "reg": 2 }, { "reg": 3 }] } },
-            { "pc": 86, "op": "store", "w": 64,
-              "addr": { "op": "add", "args": [{ "reg": 1 }, { "const": "0x8", "w": 64 }] },
-              "value": { "reg": 2 } },
-            { "pc": 87, "op": "assign", "dst": 2, "value": { "const": "0x0", "w": 64 } }
+            { "kind": "check", "pc": 85, "error": "DivideByZero",
+              "cond": { "kind": "cmp", "op": "ne",
+                "a": { "kind": "reg", "reg": 3 }, "b": { "kind": "const", "value": "0x0", "w": 64 } } },
+            { "kind": "assign", "pc": 85, "dst": 2,
+              "value": { "kind": "bin", "op": "udiv",
+                "a": { "kind": "reg", "reg": 2 }, "b": { "kind": "reg", "reg": 3 } } },
+            { "kind": "store", "pc": 86, "w": 64,
+              "addr": { "kind": "bin", "op": "add",
+                "a": { "kind": "reg", "reg": 1 }, "b": { "kind": "const", "value": "0x8", "w": 64 } },
+              "value": { "kind": "reg", "reg": 2 } },
+            { "kind": "assign", "pc": 87, "dst": 2, "value": { "kind": "const", "value": "0x0", "w": 64 } }
           ],
           "exit": { "kind": "next", "target": 88 }
         });
