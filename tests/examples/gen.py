@@ -1,10 +1,10 @@
-"""Генерирует примеры раннера: `python3 tests/examples/gen.py`.
+"""Generates runner examples: `python3 tests/examples/gen.py`.
 
-Ключи — base58-строки вида Prefix111…; vault — PDA [b"vault"] программы Cpi111…
+Keys are base58 strings of the form Prefix111…; vault is the PDA [b"vault"] of program Cpi111…
 
-asm/ — программы из tests/programs/asm для первой версии символьной машины:
-без памяти, вызовов и ветвлений, регистр читается только после записи,
-итог в r1–r9; данных инструкции и аккаунтов нет.
+asm/: programs from tests/programs/asm for the first version of the symbolic machine:
+no memory, calls or branches, a register is read only after being written,
+results in r1–r9; no instruction data or accounts.
 """
 
 import json, struct, os

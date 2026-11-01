@@ -1,4 +1,4 @@
-# add/sub/mul/and/or/xor с константой и регистром, neg64; переполнение по модулю 2^64.
+# add/sub/mul/and/or/xor with a constant and a register, neg64; overflow wraps modulo 2^64.
 .globl entrypoint
 entrypoint:
   lddw r1, 0xfffffffffffffffe

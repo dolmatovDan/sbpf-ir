@@ -1,4 +1,4 @@
-//! Типы IR. Формат и семантика — `docs/ir.md`.
+//! IR types. Format and semantics: `docs/ir.md`.
 
 mod json;
 
@@ -142,7 +142,7 @@ impl Expr {
         Expr::Reg(r)
     }
 
-    /// Старшие биты сверх `w` отбрасываются.
+    /// High bits beyond `w` are discarded.
     pub fn constant(value: u64, w: Width) -> Self {
         Expr::Const {
             value: value & w.mask(),
@@ -283,7 +283,7 @@ pub enum Stmt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Exit {
-    /// Без `pc` — продолжение в следующий блок, с `pc` — инструкция `ja`.
+    /// Without `pc`: fall through to the next block; with `pc`: a `ja` instruction.
     Next {
         target: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -295,7 +295,7 @@ pub enum Exit {
         then: usize,
         r#else: usize,
     },
-    /// `next == None` — вызов последний в программе.
+    /// `next == None`: the call is the last instruction in the program.
     Call {
         pc: usize,
         target: usize,
@@ -361,8 +361,8 @@ pub struct Module {
 pub struct ValidationError(String);
 
 impl Module {
-    /// Структурные инварианты из `docs/ir.md`: типы выражений, уникальные блоки,
-    /// существующие цели переходов и вызовов.
+    /// Structural invariants from `docs/ir.md`: expression types, unique blocks,
+    /// existing jump and call targets.
     pub fn validate(&self) -> Result<(), ValidationError> {
         let err = |msg: String| Err(ValidationError(msg));
         if self.format_version != FORMAT_VERSION {

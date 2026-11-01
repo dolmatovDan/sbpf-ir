@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Собирает тестовые контракты под каждую версию sBPF из ARCHES
-# и раскладывает их в bin/<имя>.<arch>.so. Программы asm-<имя> собираются
-# из asm/<имя>.s напрямую clang и ld.lld из platform-tools, без cargo build-sbf.
+# Builds the test programs for each sBPF version in ARCHES
+# and places them in bin/<name>.<arch>.so. The asm-<name> programs are built
+# from asm/<name>.s directly with clang and ld.lld from platform-tools, without cargo build-sbf.
 #
-# Использование: ./build.sh [программа ...]   (по умолчанию все)
+# Usage: ./build.sh [program ...]   (all by default)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Без явной версии cargo-build-sbf может взять старые platform-tools, где нет таргета sbpfv3.
+# Without an explicit version cargo-build-sbf may pick old platform-tools that lack the sbpfv3 target.
 TOOLS_VERSION="${TOOLS_VERSION:-v1.57}"
 PLATFORM_TOOLS="${PLATFORM_TOOLS:-$HOME/.cache/solana/$TOOLS_VERSION/platform-tools}"
 ARCHES=(v0 v3)
@@ -18,12 +18,12 @@ if [ ${#PROGRAMS[@]} -eq 0 ]; then
     PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}")
 fi
 
-# e_flags лежит по смещению 48 в ELF64-заголовке (little endian, u32).
+# e_flags is at offset 48 in the ELF64 header (little endian, u32).
 e_flags() {
     od -An -t u4 -j 48 -N 4 "$1" | tr -d ' '
 }
 
-# Линкер-скрипт и флаги линковки — из спецификации таргета rustc в platform-tools.
+# Linker script and link flags come from the rustc target spec in platform-tools.
 build_asm() {
     local src="$1" arch="$2" dst="$3"
     local out="out/$arch" triple cpu tool arg args=()

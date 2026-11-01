@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Ставит toolchain из rust-toolchain.toml до того, как rust-cache посчитает ключ
-      # (rustup show с 1.28 его больше не ставит).
+      # Installs the toolchain from rust-toolchain.toml before rust-cache computes its key
+      # (since 1.28, rustup show no longer installs it).
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check

@@ -1,4 +1,4 @@
-# mov64/mov32 с константой и регистром, lddw.
+# mov64/mov32 with a constant and a register, lddw.
 .globl entrypoint
 entrypoint:
   mov64 r1, 42

@@ -1,4 +1,4 @@
-//! Поддерживаются только sBPF v0 и v3.
+//! Only sBPF v0 and v3 are supported.
 
 mod common;
 

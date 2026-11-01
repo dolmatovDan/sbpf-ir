@@ -1,6 +1,6 @@
-# le16/le32/le64 и be16/be32/be64.
-# Мнемоник le* в ассемблере LLVM SBF нет: они записаны байтами
-# (опкод 0xd4, dst, imm = 16/32/64).
+# le16/le32/le64 and be16/be32/be64.
+# The LLVM SBF assembler has no le* mnemonics, so they are written as bytes
+# (opcode 0xd4, dst, imm = 16/32/64).
 .globl entrypoint
 entrypoint:
   lddw r1, 0x1122334455667788

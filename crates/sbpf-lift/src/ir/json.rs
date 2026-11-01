@@ -1,4 +1,4 @@
-//! JSON-представление IR: выражения вручную, 64-битные значения строками `"0x…"`.
+//! JSON representation of IR: expressions by hand, 64-bit values as `"0x…"` strings.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _, ser::SerializeMap};
 
@@ -90,7 +90,7 @@ impl Serialize for Expr {
     }
 }
 
-/// `kind` задаёт поля узла, `op` — операцию внутри вида.
+/// `kind` determines the node's fields, `op` the operation within that kind.
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RawExpr {
@@ -136,7 +136,7 @@ impl<'de> Deserialize<'de> for Expr {
     }
 }
 
-/// Имя ищется только среди операций своего вида: `{"kind": "bin", "op": "eq"}` — ошибка.
+/// A name is looked up only among operations of its own kind: `{"kind": "bin", "op": "eq"}` is an error.
 fn parse_op<T: Copy, E: serde::de::Error>(
     all: &[T],
     name: &str,
@@ -234,7 +234,7 @@ mod tests {
             json!({"kind": "ext", "op": "zext", "a": {"kind": "reg", "reg": 1}}),
             json!({"kind": "bin", "op": "sdiv",
                 "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
-            // Операция чужого вида.
+            // Operation of a different kind.
             json!({"kind": "bin", "op": "eq",
                 "a": {"kind": "reg", "reg": 1}, "b": {"kind": "reg", "reg": 2}}),
             json!({"kind": "un", "op": "zext", "a": {"kind": "reg", "reg": 1}}),
@@ -299,7 +299,7 @@ mod tests {
         );
     }
 
-    /// Блок `bb_85` из примера в `docs/ir.md`.
+    /// Block `bb_85` from the example in `docs/ir.md`.
     #[test]
     fn doc_example_block() {
         let doc = json!({

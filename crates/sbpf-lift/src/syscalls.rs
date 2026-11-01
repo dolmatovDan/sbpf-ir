@@ -1,8 +1,8 @@
-//! Syscall'ы рантайма Solana и загрузчик, в котором они зарегистрированы.
+//! Solana runtime syscalls and the loader they are registered in.
 //!
-//! В байткоде syscall — это `call`, у которого в `imm` лежит murmur3-хеш имени
-//! (`ebpf::hash_symbol_name`). Имя по хешу восстанавливается только через реестр
-//! загрузчика, поэтому все известные имена регистрируются в нём с функцией-заглушкой.
+//! In bytecode a syscall is a `call` whose `imm` holds the murmur3 hash of the name
+//! (`ebpf::hash_symbol_name`). A name can be recovered from its hash only via the loader's
+//! registry, so every known name is registered there with a stub function.
 
 use std::{
     collections::HashMap,
@@ -17,10 +17,10 @@ use solana_sbpf::{
     vm::{Config, ContextObject, EncryptedHostAddressToEbpfVm},
 };
 
-/// Имена syscall'ов, которые регистрирует валидатор.
+/// Names of syscalls registered by the validator.
 ///
-/// Источник: agave v4.3.0, `syscalls/src/lib.rs`, `create_program_runtime_environment`,
-/// включая syscall'ы за feature gate'ами.
+/// Source: agave v4.3.0, `syscalls/src/lib.rs`, `create_program_runtime_environment`,
+/// including feature-gated syscalls.
 pub const SYSCALLS: &[&str] = &[
     "abort",
     "sol_panic_",
@@ -67,7 +67,7 @@ pub const SYSCALLS: &[&str] = &[
     "sol_log_data",
 ];
 
-/// Имя syscall'а по хешу из `imm` инструкции `call`.
+/// Syscall name by the hash from the `imm` of a `call` instruction.
 pub fn syscall_name(hash: u32) -> Option<&'static str> {
     static BY_HASH: LazyLock<HashMap<u32, &str>> = LazyLock::new(|| {
         SYSCALLS
@@ -78,7 +78,7 @@ pub fn syscall_name(hash: u32) -> Option<&'static str> {
     BY_HASH.get(&hash).copied()
 }
 
-/// Контекст-заглушка: программа не исполняется, только загружается и анализируется.
+/// Stub context: the program is never executed, only loaded and analyzed.
 pub struct NoExec;
 
 impl ContextObject for NoExec {
@@ -106,8 +106,8 @@ fn not_executable(
 
 fn no_codegen(_jit: &mut JitCompiler<NoExec>) {}
 
-/// В отличие от валидатора при деплое, `reject_broken_elfs` выключен: v0 с неизвестным
-/// syscall'ом загружается. Метки символов включены ради имён функций.
+/// Unlike the validator on deployment, `reject_broken_elfs` is off: v0 with an unknown
+/// syscall loads. Symbol labels are enabled for function names.
 pub(crate) fn loader() -> Arc<BuiltinProgram<NoExec>> {
     let config = Config {
         enabled_sbpf_versions: SBPFVersion::V0..=SBPFVersion::V3,

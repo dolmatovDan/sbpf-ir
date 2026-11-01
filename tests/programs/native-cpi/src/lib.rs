@@ -1,7 +1,7 @@
-//! Нативная программа с CPI в System Program.
-//! Инструкция 0: transfer(lamports) от подписанта, обычный `invoke`.
-//! Инструкция 1: transfer(lamports) из PDA [b"vault", bump], `invoke_signed`.
-//! Формат данных: [opcode: u8, lamports: u64 LE].
+//! Native program with a CPI into the System Program.
+//! Instruction 0: transfer(lamports) from the signer, plain `invoke`.
+//! Instruction 1: transfer(lamports) from PDA [b"vault", bump], `invoke_signed`.
+//! Data format: [opcode: u8, lamports: u64 LE].
 
 use solana_program::{
     account_info::{next_account_info, AccountInfo},

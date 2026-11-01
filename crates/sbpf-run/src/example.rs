@@ -1,4 +1,4 @@
-//! Формат примера (вход раннера) и результата (выход). Описан в `docs/runner.md`.
+//! Format of the example (runner input) and the result (output). Described in `docs/runner.md`.
 
 use serde::{Deserialize, Serialize};
 

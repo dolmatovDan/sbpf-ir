@@ -1,4 +1,4 @@
-//! Лифтер sBPF-байткода Solana в IR.
+//! Lifter from Solana sBPF bytecode to IR.
 
 mod cfg;
 mod dot;

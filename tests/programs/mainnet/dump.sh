@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Скачивает программы из programs.txt через `solana program dump`
-# и пишет MANIFEST.md с хешами (программы в сети обновляются).
+# Downloads the programs from programs.txt via `solana program dump`
+# and writes MANIFEST.md with hashes (on-chain programs get updated).
 #
-# Использование: ./dump.sh   (RPC: переменная RPC_URL, по умолчанию mainnet-beta)
+# Usage: ./dump.sh   (RPC: RPC_URL variable, mainnet-beta by default)
 set -euo pipefail
 
 cd "$(dirname "$0")"

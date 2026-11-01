@@ -1,4 +1,4 @@
-//! Инварианты CFG на всех тестовых контрактах.
+//! CFG invariants on all test programs.
 
 mod common;
 
@@ -37,7 +37,7 @@ fn has_exit(function: &sbpf_lift::Function) -> bool {
         .any(|i| i.insn.opc == ebpf::EXIT)
 }
 
-/// Необходимые условия для `noreturn`, независимые от неподвижной точки.
+/// Necessary conditions for `noreturn` that do not depend on the fixed point.
 fn check_noreturn(cfg: &Cfg, block: &Block, ctx: &str) {
     match &block.instructions.last().unwrap().call {
         Some(CallTarget::Syscall {
@@ -59,7 +59,7 @@ fn check_noreturn(cfg: &Cfg, block: &Block, ctx: &str) {
     }
 }
 
-/// Преемники блока согласованы с его последней инструкцией.
+/// A block's successors agree with its last instruction.
 fn check_terminator(cfg: &Cfg, block: &Block, next: Option<usize>, name: &str) {
     let last = block.instructions.last().unwrap();
     let insn = &last.insn;
@@ -205,8 +205,8 @@ fn dot_export() {
     }
 }
 
-/// Встречаются все виды `call`: с возвратом, перед входом другой функции
-/// и невозвращающийся посреди функции (ребро возврата при этом сохранено).
+/// All kinds of `call` occur: returning, right before another function's entry,
+/// and non-returning in the middle of a function (with the return edge kept).
 #[test]
 fn call_kinds() {
     let cfg = build(&common::programs_dir().join("bin/anchor-basic.v0.so"));
@@ -230,7 +230,7 @@ fn call_kinds() {
     );
 }
 
-/// Сверено по дизассемблеру: `custom_panic` в этих сборках кончается `sol_panic_`.
+/// Checked against the disassembler: `custom_panic` in these builds ends with `sol_panic_`.
 #[test]
 fn custom_panic_is_noreturn() {
     for file in ["anchor-basic.v0.so", "native-cpi.v0.so"] {
@@ -252,7 +252,7 @@ fn custom_panic_is_noreturn() {
     }
 }
 
-/// Переход в другую функцию (хвостовой переход, .cold-часть) не роняет построение CFG.
+/// A jump into another function (tail jump, .cold part) does not break CFG construction.
 #[test]
 fn jump_into_other_function() {
     let path = common::programs_dir().join("bin/native-basic.v3.so");
@@ -288,7 +288,7 @@ fn jump_into_other_function() {
         .unwrap();
     assert_eq!(block.successors, [entry]);
 
-    // В DOT одной функции цель перехода — отдельный узел-заглушка.
+    // In the DOT of a single function, the jump target is a separate stub node.
     let own = cfg.functions.iter().rfind(|f| f.entry <= ptr).unwrap();
     let mut out = Vec::new();
     sbpf_lift::write_dot([own], &mut out).unwrap();
@@ -325,7 +325,7 @@ fn find_function() {
     );
 }
 
-/// В DOT одной функции нет рёбер вызовов к функциям вне вывода.
+/// The DOT of a single function has no call edges to functions outside the output.
 #[test]
 fn dot_single_function() {
     let cfg = build(&common::programs_dir().join("bin/native-cpi.v0.so"));
@@ -344,15 +344,15 @@ fn dot_single_function() {
     assert!(!dot.contains("color=gray"));
 }
 
-/// Адрес функции берётся только там, где поток исполнения не проваливается: перед
-/// каждым входом из `address_taken` стоит `exit`, `ja` или `call`. Ложный вход
-/// (константа, случайно совпавшая с адресом кода) почти наверняка это нарушит.
+/// A function's address is taken only where execution does not fall through: every
+/// entry from `address_taken` is preceded by `exit`, `ja` or `call`. A false entry
+/// (a constant that happens to match a code address) would almost certainly violate this.
 #[test]
 fn address_taken_follow_terminators() {
     for path in common::all_programs() {
         let cfg = build(&path);
         let name = path.file_name().unwrap().to_string_lossy();
-        // В asm-программах адресов кода нет.
+        // Asm programs have no code addresses.
         assert_eq!(
             cfg.address_taken.is_empty(),
             name.starts_with("asm-"),
@@ -376,8 +376,8 @@ fn address_taken_follow_terminators() {
     }
 }
 
-/// Без символов адресные функции становятся входами только через `address_taken`:
-/// в stripped-контрактах из мейннета их заметная доля.
+/// Without symbols, address-taken functions become entries only via `address_taken`:
+/// they make up a notable share of stripped mainnet programs.
 #[test]
 fn address_taken_adds_entries() {
     for name in common::MAINNET {

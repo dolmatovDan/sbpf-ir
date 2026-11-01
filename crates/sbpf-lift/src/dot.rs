@@ -1,5 +1,5 @@
-//! Экспорт CFG в Graphviz DOT: кластер на функцию, сплошные рёбра — переходы,
-//! пунктирные — вызовы (только к функциям, попавшим в вывод).
+//! CFG export to Graphviz DOT: a cluster per function, solid edges are jumps,
+//! dashed ones are calls (only to functions included in the output).
 
 use std::{collections::BTreeSet, io};
 
@@ -43,7 +43,7 @@ pub fn write_dot<'a>(
         }
         writeln!(w, "  }}")?;
         for block in &function.blocks {
-            // У noreturn-блока единственное ребро — возврат, который по анализу невозможен.
+            // A noreturn block's only edge is the return, which analysis deems impossible.
             let style = if block.noreturn {
                 " [style=dashed, color=red]"
             } else {
@@ -57,7 +57,7 @@ pub fn write_dot<'a>(
             }
         }
     }
-    // Переходы в функции, не попавшие в вывод.
+    // Jumps into functions not included in the output.
     for pc in external {
         writeln!(w, "  lbb_{pc} [label=\"→ lbb_{pc}\", shape=note];")?;
     }

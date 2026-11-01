@@ -1,4 +1,4 @@
-//! Минимальная Anchor-программа: счётчик с владельцем.
+//! Minimal Anchor program: a counter with an owner.
 
 use anchor_lang::prelude::*;
 

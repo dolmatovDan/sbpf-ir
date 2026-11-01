@@ -1,4 +1,4 @@
-//! Лифтер: инструкции sBPF → IR по таблицам «Перевод инструкций» из `docs/ir.md`.
+//! Lifter: sBPF instructions → IR per the "Instruction translation" tables in `docs/ir.md`.
 
 use solana_sbpf::{
     ebpf::{self, Insn},
@@ -50,8 +50,8 @@ pub fn lift(program: &Program, cfg: &Cfg) -> Result<Module, LiftError> {
     })
 }
 
-/// `end` — число слотов кода. Если управление может провалиться за конец кода,
-/// в последнюю функцию добавляется блок `end` с `trap ExecutionOverrun`.
+/// `end` is the number of code slots. If control can fall through past the end of code,
+/// a block `end` with `trap ExecutionOverrun` is added to the last function.
 fn lift_functions(
     version: SBPFVersion,
     cfg_functions: &[crate::Function],
@@ -123,8 +123,8 @@ fn lift_block(version: SBPFVersion, block: &crate::Block, end: usize) -> Result<
     })
 }
 
-/// Выход блока, который кончается инструкцией `ins`; `None`, если она не передаёт
-/// управление. `next` — pc следующей инструкции, `None` у последней в программе.
+/// Exit of a block ending with instruction `ins`; `None` if it does not transfer
+/// control. `next` is the pc of the next instruction, `None` for the last one in the program.
 fn lift_exit(
     version: SBPFVersion,
     ins: &Instruction,
@@ -171,7 +171,7 @@ fn lift_exit(
                     pc,
                     cond: jump_cond(insn)?,
                     then: target,
-                    // Условный переход в конце кода проваливается в ExecutionOverrun.
+                    // A conditional jump at the end of code falls through into ExecutionOverrun.
                     r#else: pc + 1,
                 }
             }
@@ -180,7 +180,7 @@ fn lift_exit(
     Ok(Some(exit))
 }
 
-/// Вызывается только для условных переходов: класс jmp32 в v0 отсекает `jump_target`.
+/// Called only for conditional jumps: in v0 the jmp32 class is cut off by `jump_target`.
 fn jump_cond(insn: &Insn) -> Result<Expr, LiftError> {
     let reg_src = insn.opc & ebpf::BPF_X != 0;
     let (a, b, w) = if insn.opc & ebpf::BPF_CLS_MASK == ebpf::BPF_JMP32 {
@@ -221,7 +221,7 @@ fn jump_cond(insn: &Insn) -> Result<Expr, LiftError> {
     Ok(Expr::cmp(op, a, b))
 }
 
-/// Statement'ы инструкции, которая не передаёт управление.
+/// Statements of an instruction that does not transfer control.
 fn lift_stmts(insn: &Insn) -> Result<Vec<Stmt>, LiftError> {
     if matches!(insn.opc, ebpf::LE | ebpf::BE) {
         return byte_order(insn);
@@ -325,7 +325,7 @@ fn alu(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
     let mut src = if reg_src {
         narrow(Expr::reg(insn.src))
     } else {
-        // `imm` уже знаково расширен до i64 при декодировании.
+        // `imm` is already sign-extended to i64 during decoding.
         Expr::constant(insn.imm as u64, w)
     };
 
@@ -355,14 +355,14 @@ fn alu(insn: &Insn, w: Width) -> Result<Vec<Stmt>, LiftError> {
                     error: Fault::DivideByZero,
                 });
             }
-            // Константу сдвига меньше `w` гарантирует верификатор, регистр маскирует VM.
+            // The verifier guarantees a shift constant below `w`; the VM masks a register shift.
             if reg_src && matches!(op, BinOp::Shl | BinOp::Lshr | BinOp::Ashr) {
                 src = Expr::bin(BinOp::And, src, Expr::constant((w.bits() - 1).into(), w));
             }
             Expr::bin(op, dst, src)
         }
     };
-    // В v0/v3 результат add32/sub32/mul32 расширяется знаком, остальных — нулями.
+    // In v0/v3 the add32/sub32/mul32 result is sign-extended, the others zero-extended.
     let sign_extend = matches!(
         insn.opc & ebpf::BPF_ALU_OP_MASK,
         ebpf::BPF_ADD | ebpf::BPF_SUB | ebpf::BPF_MUL
@@ -704,7 +704,7 @@ mod tests {
                 Expr::c32(0)
             )))
         );
-        // В v0 класса jmp32 нет: инструкцию отвергает lift_stmts.
+        // v0 has no jmp32 class: lift_stmts rejects the instruction.
         assert_eq!(
             exit_of(SBPFVersion::V0, insn(ebpf::JEQ32_IMM, 1, 0, 5, 0), None),
             None
@@ -839,7 +839,7 @@ mod tests {
 
     #[test]
     fn falls_off_the_end() {
-        // mov r1, 1; lddw r1, ... — последняя инструкция занимает слоты 1..=2.
+        // mov r1, 1; lddw r1, ...: the last instruction occupies slots 1..=2.
         let blocks = function(vec![cfg_block(
             0,
             vec![at(0, ebpf::MOV64_IMM, 1), at(1, ebpf::LD_DW_IMM, 5)],

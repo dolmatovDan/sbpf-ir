@@ -1,4 +1,4 @@
-//! CLI лифтера: `sbpf-lift {cfg | lift | ir} <file.so> ...`, `sbpf-lift run <example.json>`.
+//! Lifter CLI: `sbpf-lift {cfg | lift | ir} <file.so> ...`, `sbpf-lift run <example.json>`.
 
 use std::{
     fs::File,
@@ -19,49 +19,49 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Функции, базовые блоки и переходы программы.
+    /// Functions, basic blocks and edges of the program.
     Cfg {
         file: PathBuf,
-        /// Вывести в формате Graphviz DOT.
+        /// Output in Graphviz DOT format.
         #[arg(long)]
         dot: bool,
-        /// Только одна функция: имя или pc входа.
+        /// Only one function: name or entry pc.
         #[arg(short, long)]
         function: Option<String>,
-        /// Файл для вывода (по умолчанию stdout).
+        /// Output file (stdout by default).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// IR программы в JSON (формат — docs/ir.md).
+    /// Program IR as JSON (format: docs/ir.md).
     Lift {
         file: PathBuf,
-        /// С отступами.
+        /// Pretty-printed.
         #[arg(long)]
         pretty: bool,
-        /// Файл для вывода (по умолчанию stdout).
+        /// Output file (stdout by default).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// IR программы в текстовом виде.
+    /// Program IR as text.
     Ir {
         file: PathBuf,
-        /// Только одна функция: имя или pc входа.
+        /// Only one function: name or entry pc.
         #[arg(short, long)]
         function: Option<String>,
-        /// Файл для вывода (по умолчанию stdout).
+        /// Output file (stdout by default).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Исполнить контракт на примере через Mollusk (формат — docs/runner.md).
+    /// Execute the program on an example via Mollusk (format: docs/runner.md).
     Run {
         example: PathBuf,
-        /// Добавить финальные регистры r0..r10 и pc.
+        /// Include final registers r0..r10 and pc.
         #[arg(long)]
         registers: bool,
-        /// Добавить трассу регистров по каждой инструкции.
+        /// Include a per-instruction register trace.
         #[arg(long)]
         trace: bool,
-        /// Файл для вывода (по умолчанию stdout).
+        /// Output file (stdout by default).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -69,8 +69,8 @@ enum Command {
 
 fn main() -> ExitCode {
     if std::env::var_os("RUST_LOG").is_none() {
-        // Mollusk включает debug-логи рантайма; логи программы и так есть в выводе run.
-        // SAFETY: других потоков ещё нет.
+        // Mollusk enables runtime debug logs; program logs are already in the run output.
+        // SAFETY: no other threads exist yet.
         unsafe { std::env::set_var("RUST_LOG", "error") };
     }
     match run(Cli::parse().command) {

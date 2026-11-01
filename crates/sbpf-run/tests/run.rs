@@ -14,7 +14,7 @@ fn load(path: &Path) -> Example {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// Пример как есть (`.v0.so`) и тот же пример на `.v3.so`.
+/// The example as is (`.v0.so`) and the same example on `.v3.so`.
 fn v0_and_v3(path: &Path) -> [Example; 2] {
     let v0 = load(path);
     assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
@@ -117,7 +117,7 @@ fn anchor_basic() {
     assert_failure("anchor-basic/increment-wrong-authority", "Custom(2001)");
 }
 
-/// Итог asm-программ в r1–r9 на v0 и v3; ожидания посчитаны по семантике `docs/ir.md`.
+/// Final r1–r9 of the asm programs on v0 and v3; expected values computed from the `docs/ir.md` semantics.
 #[test]
 fn asm() {
     let options = Options {
@@ -234,7 +234,7 @@ fn input_accounts_unchanged_on_failure() {
     }
 }
 
-/// v0 и v3 одного контракта дают одинаковый итог; различаются только CU.
+/// v0 and v3 of the same program give the same result; only CU differs.
 #[test]
 fn v0_and_v3_agree() {
     for path in all_examples() {

@@ -1,6 +1,6 @@
-# Беззнаковые div/mod 64 и 32 с константой и регистром, делители не 0.
-# Отрицательная константа в div64 расширяется знаком, в div32 берутся её младшие 32 бита.
-# У 32-битных операндов-регистров есть старшие биты, они не должны влиять.
+# Unsigned 64- and 32-bit div/mod with a constant and a register, nonzero divisors.
+# A negative constant is sign-extended in div64; div32 takes its low 32 bits.
+# 32-bit register operands have high bits set, which must not matter.
 .globl entrypoint
 entrypoint:
   mov64 r1, 100

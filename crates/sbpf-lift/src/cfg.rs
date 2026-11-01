@@ -1,12 +1,12 @@
-//! CFG программы: функции, базовые блоки, переходы и вызовы.
+//! Program CFG: functions, basic blocks, edges and calls.
 //!
-//! Блоки режем сами: `static_analysis::Analysis` в v3 не видит функций (registry
-//! программы там заполняется только из отладочных символов) и теряет ребро
-//! проваливания у первого блока функции.
+//! We split blocks ourselves: `static_analysis::Analysis` does not see functions in v3 (the
+//! program registry there is filled only from debug symbols) and loses the fall-through
+//! edge of a function's first block.
 //!
-//! Входы функций: точка входа, символы из registry, цели `call` и адреса кода,
-//! которые встречаются в программе (кандидаты для `callx`). Функция без символа,
-//! адрес которой вычисляется иначе, окажется внутри предыдущей.
+//! Function entries: the entrypoint, registry symbols, `call` targets and code addresses
+//! that appear in the program (candidates for `callx`). A function without a symbol
+//! whose address is computed some other way ends up inside the preceding one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,17 +23,17 @@ use crate::{Program, syscall_name};
 pub struct Cfg {
     pub version: SBPFVersion,
     pub entrypoint: usize,
-    /// В порядке адресов; блоки функции идут подряд от её входа до входа следующей.
+    /// In address order; a function's blocks are contiguous from its entry to the next entry.
     pub functions: Vec<Function>,
-    /// Входы, чей адрес встречается как константа `lddw` или как выровненное 8-байтное
-    /// слово read-only региона вне кода.
+    /// Entries whose address appears as an `lddw` constant or as an aligned 8-byte
+    /// word of a read-only region outside the code.
     pub address_taken: Vec<usize>,
 }
 
 #[derive(Debug)]
 pub struct Function {
     pub entry: usize,
-    /// Имя символа (demangled) или `fn_<pc>`.
+    /// Symbol name (demangled) or `fn_<pc>`.
     pub name: String,
     pub blocks: Vec<Block>,
 }
@@ -42,20 +42,20 @@ pub struct Function {
 pub struct Block {
     pub start: usize,
     pub instructions: Vec<Instruction>,
-    /// Переходы внутри функции; у `call` — возврат в следующий блок.
-    /// Пусто после `exit`, невалидного вызова и вызова, за которым сразу начинается
-    /// другая функция. После невозвращающегося вызова ребро возврата остаётся.
+    /// Edges within the function; for `call`, the return to the next block.
+    /// Empty after `exit`, an invalid call, and a call immediately followed by the start of
+    /// another function. After a non-returning call the return edge is kept.
     pub successors: Vec<usize>,
-    /// Блок кончается вызовом, который по анализу не возвращается: из функции
-    /// не достижим `exit`, либо это `abort`/`sol_panic_`. Эвристика опирается на
-    /// приблизительные границы функций, поэтому ребро возврата не удаляется.
+    /// The block ends with a call that analysis finds non-returning: `exit` is unreachable
+    /// from the callee, or it is `abort`/`sol_panic_`. The heuristic relies on
+    /// approximate function boundaries, so the return edge is not removed.
     pub noreturn: bool,
 }
 
 #[derive(Debug)]
 pub struct Instruction {
     pub insn: Insn,
-    /// Текст дизассемблера с именами syscall'ов и функций.
+    /// Disassembler text with syscall and function names.
     pub text: String,
     pub call: Option<CallTarget>,
 }
@@ -75,9 +75,9 @@ pub enum CallTarget {
     Internal {
         pc: usize,
     },
-    /// `name == None` — хеша нет в [`crate::SYSCALLS`]. В v0 сюда же попадает `call`,
-    /// не найденный в registry программы: отличить его от нового syscall'а нельзя,
-    /// в рантайме оба дают ошибку исполнения, если syscall неизвестен валидатору.
+    /// `name == None`: the hash is not in [`crate::SYSCALLS`]. In v0 this also covers a `call`
+    /// not found in the program registry: it cannot be told apart from a new syscall,
+    /// and at runtime both fail execution if the syscall is unknown to the validator.
     Syscall {
         hash: u32,
         name: Option<&'static str>,
@@ -85,8 +85,8 @@ pub enum CallTarget {
     Indirect {
         reg: u8,
     },
-    /// Цель не начало инструкции, либо в v3 `src` не 0 и не 1. Интерпретатор
-    /// завершает программу ошибкой.
+    /// The target is not an instruction start, or in v3 `src` is neither 0 nor 1. The interpreter
+    /// terminates the program with an error.
     Invalid,
 }
 
@@ -122,7 +122,7 @@ impl Cfg {
 
         let mut names: BTreeMap<usize, String> = BTreeMap::new();
         for (_, (name, pc)) in registry.iter() {
-            // `function_<pc>` загрузчик придумывает сам для целей call в v0.
+            // The loader makes up `function_<pc>` itself for call targets in v0.
             if !name.is_empty() && name != format!("function_{pc}").as_bytes() {
                 names.insert(
                     pc,
@@ -232,7 +232,7 @@ impl Cfg {
         }
     }
 
-    /// Функция по имени или по pc входа.
+    /// Function by name or by entry pc.
     pub fn find_function(&self, query: &str) -> Result<&Function, FindFunctionError> {
         if let Ok(pc) = query.parse() {
             return self.function_at(pc).ok_or(FindFunctionError::NoEntryAt(pc));
@@ -263,7 +263,7 @@ impl Cfg {
         self.blocks().flat_map(|b| &b.instructions)
     }
 
-    /// (pc, хеш) вызовов syscall'ов с неизвестным именем.
+    /// (pc, hash) of syscall calls with an unknown name.
     pub fn unknown_syscalls(&self) -> Vec<(usize, u32)> {
         self.instructions()
             .filter_map(|i| match i.call {
@@ -310,7 +310,7 @@ fn address_taken(
         .collect()
 }
 
-/// `lddw` занимает два слота и декодируется в одну инструкцию с 64-битным `imm`.
+/// `lddw` takes two slots and decodes into one instruction with a 64-bit `imm`.
 fn decode(text: &[u8]) -> Vec<Insn> {
     let slots = text.len() / ebpf::INSN_SIZE;
     let mut insns = Vec::with_capacity(slots);
@@ -356,8 +356,8 @@ fn call_returns(call: &Option<CallTarget>, returning: &BTreeSet<usize>) -> bool 
     }
 }
 
-/// Функция возвращается, если от входа достижим `exit`, причём через вызов можно
-/// пройти, только если он сам возвращается. Наименьшая неподвижная точка.
+/// A function returns if `exit` is reachable from its entry, where a call can be
+/// passed through only if it returns itself. Least fixed point.
 fn mark_noreturn(functions: &mut [Function]) {
     let mut returning = BTreeSet::new();
     loop {
@@ -383,7 +383,7 @@ fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
     let mut seen = BTreeSet::from([function.entry]);
     let mut stack = vec![function.entry];
     while let Some(start) = stack.pop() {
-        // Переход в другую функцию: исход неизвестен, считаем, что возврат есть.
+        // Jump into another function: outcome unknown, assume it returns.
         let Some(block) = index.get(&start) else {
             return true;
         };
@@ -394,7 +394,7 @@ fn reaches_exit(function: &Function, returning: &BTreeSet<usize>) -> bool {
         if !call_returns(&last.call, returning) {
             continue;
         }
-        // Возврат из вызова сразу в другую функцию: ребра в CFG нет, исход неизвестен.
+        // Return from a call straight into another function: no CFG edge, outcome unknown.
         if last.call.is_some() && block.successors.is_empty() {
             return true;
         }
@@ -420,7 +420,7 @@ fn successors(
     match last.opc {
         ebpf::EXIT => vec![],
         ebpf::JA => vec![jump_target(version, last).unwrap()],
-        // После невозвращающегося вызова (panic) сразу может начинаться другая функция.
+        // Another function may start right after a non-returning call (panic).
         ebpf::CALL_IMM | ebpf::CALL_REG => next
             .filter(|pc| !entries.contains(pc))
             .into_iter()
@@ -437,9 +437,9 @@ fn successors(
     }
 }
 
-/// Повторяет разрешение `CALL_IMM` в интерпретаторе `solana-sbpf`: в v0 сначала
-/// syscall по `imm`, затем функция из registry; в v3 `src == 0` — syscall,
-/// `src == 1` — функция по относительному смещению.
+/// Mirrors `CALL_IMM` resolution in the `solana-sbpf` interpreter: in v0, first a
+/// syscall by `imm`, then a function from the registry; in v3 `src == 0` is a syscall,
+/// `src == 1` is a function at a relative offset.
 fn call_target(
     version: SBPFVersion,
     insn: &Insn,
@@ -521,9 +521,9 @@ mod tests {
         }
     }
 
-    /// После возвращающегося вызова сразу начинается другая функция (например, вход
-    /// из `address_taken`): ребра возврата в CFG нет, но функция от этого не становится
-    /// невозвращающейся.
+    /// Right after a returning call another function starts (e.g. an entry
+    /// from `address_taken`): there is no return edge in the CFG, but that does not make
+    /// the function non-returning.
     #[test]
     fn returning_call_before_entry() {
         let call_b = Some(CallTarget::Internal { pc: 2 });

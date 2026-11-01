@@ -1,5 +1,5 @@
-//! Смоук-тест: все тестовые контракты загружаются, проходят верификацию
-//! и определяются с ожидаемой версией sBPF.
+//! Smoke test: all test programs load, pass verification
+//! and are detected with the expected sBPF version.
 
 mod common;
 

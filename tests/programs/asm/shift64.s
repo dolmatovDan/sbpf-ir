@@ -1,4 +1,4 @@
-# lsh/rsh/arsh: константа < 64, сдвиг на регистр берётся по модулю 64.
+# lsh/rsh/arsh: constant < 64, a register shift amount is taken modulo 64.
 .globl entrypoint
 entrypoint:
   mov64 r1, 1

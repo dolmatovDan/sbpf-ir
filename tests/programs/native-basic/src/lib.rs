@@ -1,5 +1,5 @@
-//! Простая нативная программа: ветвления, 32/64-битная арифметика, деление, циклы, логи.
-//! Формат данных инструкции: [opcode: u8, a: u64 LE, b: u64 LE].
+//! Simple native program: branches, 32/64-bit arithmetic, division, loops, logs.
+//! Instruction data format: [opcode: u8, a: u64 LE, b: u64 LE].
 
 use solana_program::{
     account_info::AccountInfo, entrypoint, entrypoint::ProgramResult, msg,

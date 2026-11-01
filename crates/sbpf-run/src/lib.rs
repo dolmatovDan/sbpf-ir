@@ -1,5 +1,5 @@
-//! Конкретный раннер: исполняет `.so` на одной инструкции через Mollusk —
-//! тот же загрузчик, syscall'ы и сериализацию аккаунтов, что у валидатора agave.
+//! Concrete runner: executes a `.so` on a single instruction via Mollusk, with
+//! the same loader, syscalls and account serialization as the agave validator.
 
 pub mod example;
 
@@ -22,7 +22,7 @@ use solana_transaction_context::instruction_accounts::InstructionAccount;
 pub use example::{AccountInput, AccountOutput, Example, ExtraProgram, Outcome, Status};
 pub use mollusk_svm;
 
-/// Встроенные программы Mollusk; `programs` не может их подменить.
+/// Mollusk builtin programs; `programs` cannot override them.
 const BUILTINS: [fn() -> Pubkey; 8] = [
     solana_sdk_ids::system_program::id,
     solana_sdk_ids::native_loader::id,
@@ -34,9 +34,9 @@ const BUILTINS: [fn() -> Pubkey; 8] = [
     solana_sdk_ids::zk_elgamal_proof_program::id,
 ];
 
-/// Лимит транзакции без инструкций ComputeBudget, как у валидатора.
+/// Transaction limit without ComputeBudget instructions, as in the validator.
 pub const DEFAULT_COMPUTE_UNIT_LIMIT: u32 = 200_000;
-/// Больший лимит валидатор урезает до этого значения.
+/// The validator caps a larger limit to this value.
 pub const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -148,8 +148,8 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
     let traces = Rc::new(RefCell::new(Vec::new()));
     let logs = LogCollector::new_ref();
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        // Трассировка включается только при создании Mollusk, а такой конструктор
-        // ищет ELF по имени `<name>.so`; абсолютный путь подменяет каталоги поиска.
+        // Tracing is enabled only when Mollusk is created, and that constructor
+        // looks up the ELF by the name `<name>.so`; an absolute path overrides the search directories.
         let name = program_path.with_extension("");
         let mut mollusk = Mollusk::new_debuggable(&program_id, &name.to_string_lossy(), tracing);
         for (id, elf) in &extra {
@@ -212,7 +212,7 @@ pub fn run(example: &Example, base_dir: &Path, options: Options) -> Result<Outco
     })
 }
 
-/// Трасса регистров вызова верхнего уровня; трассы CPI отбрасываются.
+/// Register trace of the top-level invocation; CPI traces are discarded.
 struct TopLevelTrace(Rc<RefCell<Vec<[u64; 12]>>>);
 
 impl InvocationInspectCallback for TopLevelTrace {

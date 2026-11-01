@@ -1,4 +1,4 @@
-//! Инварианты IR на всех тестовых контрактах.
+//! IR invariants on all test programs.
 
 mod common;
 
@@ -11,7 +11,7 @@ use sbpf_lift::{
     solana_sbpf::ebpf,
 };
 
-/// Третье значение — число слотов кода по длине `.text`, независимо от декодирования в CFG.
+/// The third value is the number of code slots from the `.text` length, independent of CFG decoding.
 fn lift_file(path: &std::path::Path) -> (Cfg, Module, usize) {
     let program = Program::load_file(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let cfg = Cfg::build(&program);
@@ -41,7 +41,7 @@ fn invariants() {
         assert_eq!(module.entrypoint, cfg.entrypoint, "{name}");
         assert_eq!(module.address_taken, cfg.address_taken, "{name}");
 
-        // Одна инструкция — ровно один statement (кроме check) или выход с pc.
+        // One instruction is exactly one statement (except check) or an exit with a pc.
         let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
         for block in module.functions.iter().flat_map(|f| &f.blocks) {
             for stmt in &block.statements {
@@ -67,7 +67,7 @@ fn invariants() {
             cfg.instructions().map(|i| (i.insn.ptr, 1)).collect();
         assert_eq!(seen, expected, "{name}");
 
-        // Блоки и noreturn — те же, что в CFG.
+        // Blocks and noreturn are the same as in the CFG.
         let blocks: Vec<_> = cfg.blocks().map(|b| (b.start, b.noreturn)).collect();
         let lifted: Vec<_> = module
             .functions
@@ -84,8 +84,8 @@ fn invariants() {
     }
 }
 
-/// Asm-примеры для первой версии машины: один блок без памяти и вызовов,
-/// регистр читается только после записи, в итоге записаны все r1–r9.
+/// Asm examples for the first version of the machine: one block without memory or calls,
+/// a register is read only after being written, and all of r1–r9 are written in the end.
 #[test]
 fn asm_programs_are_straight_line() {
     let mut count = 0;
@@ -144,7 +144,7 @@ fn header() {
     let (_, v3, _) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
     assert_eq!((v0.format_version, v0.sbpf_version), (1, 0));
     assert_eq!((v3.format_version, v3.sbpf_version), (1, 3));
-    // В v0 код входит в read-only регион, в v3 нет.
+    // In v0 the code is part of the read-only region, in v3 it is not.
     let contains_text = |m: &Module| {
         (m.ro_region.vaddr..m.ro_region.vaddr + m.ro_region.data.len() as u64)
             .contains(&m.text_vaddr)
@@ -153,8 +153,8 @@ fn header() {
     assert!(!contains_text(&v3));
 }
 
-/// Пример `checked_div` из `docs/ir.md` (native-basic, v3); имя функции в сборке
-/// без символов — `fn_<pc>`, поэтому её ищем по коду, а не по имени.
+/// The `checked_div` example from `docs/ir.md` (native-basic, v3); in a build without
+/// symbols the function is named `fn_<pc>`, so we find it by code rather than by name.
 #[test]
 fn doc_example_text() {
     let (_, module, _) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
@@ -187,8 +187,8 @@ fn doc_example_text() {
     assert_eq!(found, 1);
 }
 
-/// Сдвигает все pc так, чтобы функция начиналась с 0: пример не зависит от сборки.
-/// pc меньше `base` (переход в более раннюю функцию) превращается в `?`.
+/// Shifts all pcs so that the function starts at 0: the example does not depend on the build.
+/// A pc below `base` (a jump into an earlier function) becomes `?`.
 fn renumber(text: &str, base: usize) -> String {
     let mut out = String::new();
     let mut rest = text;

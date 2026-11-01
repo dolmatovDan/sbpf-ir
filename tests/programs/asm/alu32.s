@@ -1,4 +1,4 @@
-# 32-битная арифметика: add32/sub32/mul32 расширяют результат знаком, остальные — нулями.
+# 32-bit arithmetic: add32/sub32/mul32 sign-extend the result, the others zero-extend.
 .globl entrypoint
 entrypoint:
   mov32 w1, 0x7fffffff

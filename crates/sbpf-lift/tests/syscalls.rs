@@ -1,4 +1,4 @@
-//! Syscall'ы разрешаются в имена и в v0 (релокации), и в v3 (статические).
+//! Syscalls resolve to names both in v0 (relocations) and in v3 (static).
 
 mod common;
 
@@ -68,7 +68,7 @@ fn disassembler_shows_syscall_names() {
     }
 }
 
-/// v3: `call` с `src` не 0/1 интерпретатор не исполняет.
+/// v3: the interpreter does not execute a `call` whose `src` is not 0/1.
 #[test]
 fn v3_invalid_call() {
     let mut call = [ebpf::CALL_IMM, 0, 0, 0, 0, 0, 0, 0];
@@ -90,7 +90,7 @@ fn v3_invalid_call() {
     assert!(block.successors.is_empty());
 }
 
-/// v3: `call` (src=1) с целью за пределами программы.
+/// v3: `call` (src=1) with a target outside the program.
 #[test]
 fn v3_call_out_of_program() {
     let mut bytes = read("native-basic.v3.so");
@@ -141,16 +141,16 @@ fn assert_reported(bytes: &[u8], name: &[u8]) {
     assert!(cfg.unknown_syscalls().iter().any(|&(_, h)| h == hash));
 }
 
-/// Валидатор (`RequisiteVerifier`) хеши syscall'ов не проверяет, поэтому
-/// неизвестный syscall не мешает загрузке ни в v0, ни в v3.
+/// The validator (`RequisiteVerifier`) does not check syscall hashes, so
+/// an unknown syscall does not prevent loading in either v0 or v3.
 #[test]
 fn unknown_syscall_is_reported() {
-    // v0: хеш вписывает загрузчик по имени символа из релокации.
+    // v0: the loader writes the hash in from the relocation's symbol name.
     let mut bytes = read("native-basic.v0.so");
     replace(&mut bytes, b"sol_log_\0", b"sol_xog_\0");
     assert_reported(&bytes, b"sol_xog_");
 
-    // v3: хеш уже записан в инструкции call (src=0).
+    // v3: the hash is already written into the call instruction (src=0).
     let mut call = [ebpf::CALL_IMM, 0, 0, 0, 0, 0, 0, 0];
     call[4..].copy_from_slice(&ebpf::hash_symbol_name(b"sol_log_").to_le_bytes());
     let mut patched = call;

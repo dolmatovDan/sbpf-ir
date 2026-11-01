@@ -1,5 +1,5 @@
-# lsh32/rsh32/arsh32: результат расширяется нулями, сдвиг на регистр берётся
-# по модулю 32 от младших 32 бит, старшие биты регистра не влияют.
+# lsh32/rsh32/arsh32: the result is zero-extended, a register shift amount is taken
+# modulo 32 from the low 32 bits; the register's high bits do not matter.
 .globl entrypoint
 entrypoint:
   mov32 w1, 1

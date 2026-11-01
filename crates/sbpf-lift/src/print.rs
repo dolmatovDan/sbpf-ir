@@ -1,4 +1,4 @@
-//! Текстовая запись IR для чтения человеком, как в примере из `docs/ir.md`.
+//! Human-readable text form of IR, as in the example in `docs/ir.md`.
 
 use std::{
     collections::BTreeMap,

@@ -1,4 +1,4 @@
-//! Загрузка `.so` через `solana-sbpf`: разбор ELF, релокации, верификация.
+//! Loading `.so` via `solana-sbpf`: ELF parsing, relocations, verification.
 
 use std::{fs, io, path::Path};
 
@@ -20,7 +20,7 @@ pub enum LoadError {
     NotElf,
     #[error("ошибка заголовка ELF: {0}")]
     Header(#[from] ElfParserError),
-    /// Поддерживаются только v0 (контракты в мейннете) и v3 (новые деплои).
+    /// Only v0 (mainnet programs) and v3 (new deployments) are supported.
     #[error("неподдерживаемая версия sBPF: {0:?}")]
     UnsupportedVersion(SBPFVersion),
     #[error("ошибка загрузки ELF: {0}")]
@@ -29,15 +29,15 @@ pub enum LoadError {
     Verifier(EbpfError),
 }
 
-/// Загруженная и проверенная программа.
+/// A loaded and verified program.
 pub struct Program {
     executable: Executable<NoExec>,
 }
 
 impl Program {
-    /// ELF и релокации разбирает `solana-sbpf`, затем байткод проходит `RequisiteVerifier`,
-    /// как при деплое: дальше можно полагаться на допустимые опкоды, регистры,
-    /// переходы в пределах программы и целые `lddw`.
+    /// `solana-sbpf` parses the ELF and relocations, then the bytecode goes through `RequisiteVerifier`,
+    /// as on deployment: from then on we can rely on valid opcodes, registers,
+    /// jumps within the program and complete `lddw`s.
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
         if !bytes.starts_with(b"\x7fELF") {
             return Err(LoadError::NotElf);

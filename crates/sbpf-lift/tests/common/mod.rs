@@ -1,4 +1,4 @@
-//! Общие помощники тестов: пути к тестовым контрактам.
+//! Shared test helpers: paths to test programs.
 
 #![allow(dead_code)]
 
@@ -8,7 +8,7 @@ pub fn programs_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/programs"))
 }
 
-/// Собственные тестовые контракты: `bin/<имя>.<v0|v3>.so`.
+/// Our own test programs: `bin/<name>.<v0|v3>.so`.
 pub fn own_programs() -> Vec<PathBuf> {
     let mut paths: Vec<_> = std::fs::read_dir(programs_dir().join("bin"))
         .unwrap()
@@ -25,7 +25,7 @@ pub fn mainnet_program(name: &str) -> PathBuf {
     programs_dir().join("mainnet").join(format!("{name}.so"))
 }
 
-/// Все тестовые контракты: собственные и из мейннета.
+/// All test programs: our own and mainnet ones.
 pub fn all_programs() -> Vec<PathBuf> {
     let mut paths = own_programs();
     paths.extend(MAINNET.map(mainnet_program));
