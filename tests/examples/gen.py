@@ -4,7 +4,7 @@ Keys are base58 strings of the form Prefix111…; vault is the PDA [b"vault"] of
 
 asm/: programs from tests/programs/asm for the symbolic machine:
 no memory or calls (jumps and loops are allowed), a register is read only after being written,
-results in r1–r9; no instruction data or accounts.
+results in r1–r9; no instruction data or accounts. An example on .v3.so is for a v3-only program (jmp32).
 """
 
 import json, struct, os
@@ -68,3 +68,6 @@ w("anchor-basic/increment-wrong-authority.json",anchor_ex(5,3,other))
 asm=key('Asm')
 for name in ["mov","alu64","shift64","alu32","shift32","divmod","endian","jump","loop"]:
     w(f"asm/{name}.json",{"program":f"../../programs/bin/asm-{name}.v0.so","program_id":asm,"instruction_data":""})
+# Only for v3: the example points to .v3.so.
+for name in ["jmp32"]:
+    w(f"asm/{name}.json",{"program":f"../../programs/bin/asm-{name}.v3.so","program_id":asm,"instruction_data":""})

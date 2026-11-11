@@ -136,7 +136,7 @@ fn asm_programs_shape() {
             written[1..10].iter().all(|&w| w),
             "{name}: записаны не все r1–r9"
         );
-        if ["asm-jump.", "asm-loop."]
+        if ["asm-jump.", "asm-loop.", "asm-jmp32."]
             .iter()
             .any(|p| name.starts_with(p))
         {
@@ -152,7 +152,10 @@ fn asm_programs_shape() {
             );
         }
     }
-    assert_eq!(count, 18, "ожидалось 9 asm-программ × (v0, v3)");
+    assert_eq!(
+        count, 19,
+        "ожидалось 9 asm-программ × (v0, v3) + 1 только под v3"
+    );
 }
 
 fn assert_reads_written(expr: &Expr, written: &[bool; 11], name: &str) {

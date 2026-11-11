@@ -13,10 +13,20 @@ TOOLS_VERSION="${TOOLS_VERSION:-v1.57}"
 PLATFORM_TOOLS="${PLATFORM_TOOLS:-$HOME/.cache/solana/$TOOLS_VERSION/platform-tools}"
 ARCHES=(v0 v3)
 ASM=(mov alu64 shift64 alu32 shift32 divmod endian jump loop)
+# Asm programs built only for v3: they use instructions the v0 verifier rejects (jmp32).
+ASM_V3=(jmp32)
 PROGRAMS=("$@")
 if [ ${#PROGRAMS[@]} -eq 0 ]; then
-    PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}")
+    PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}" "${ASM_V3[@]/#/asm-}")
 fi
+
+v3_only() {
+    local name
+    for name in "${ASM_V3[@]}"; do
+        [ "$1" = "asm-$name" ] && return 0
+    done
+    return 1
+}
 
 # e_flags is at offset 48 in the ELF64 header (little endian, u32).
 e_flags() {
@@ -66,6 +76,9 @@ mkdir -p bin
 for arch in "${ARCHES[@]}"; do
     out="out/$arch"
     for prog in "${PROGRAMS[@]}"; do
+        if [ "$arch" != v3 ] && v3_only "$prog"; then
+            continue
+        fi
         echo "==> $prog ($arch)"
         dst="bin/$prog.$arch.so"
         if [[ "$prog" == asm-* ]]; then

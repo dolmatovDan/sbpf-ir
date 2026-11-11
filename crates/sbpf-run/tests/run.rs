@@ -14,13 +14,17 @@ fn load(path: &Path) -> Example {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// The example as is (`.v0.so`) and the same example on `.v3.so`.
-fn v0_and_v3(path: &Path) -> [Example; 2] {
-    let v0 = load(path);
-    assert!(v0.program.ends_with(".v0.so"), "{}", path.display());
-    let mut v3 = v0.clone();
-    v3.program = v0.program.replace(".v0.so", ".v3.so");
-    [v0, v3]
+/// The example on every version it is built for: an example on `.v0.so` as is and on `.v3.so`;
+/// an example on `.v3.so` is a v3-only program (jmp32) and runs as is.
+fn versions(path: &Path) -> Vec<Example> {
+    let example = load(path);
+    if example.program.ends_with(".v3.so") {
+        return vec![example];
+    }
+    assert!(example.program.ends_with(".v0.so"), "{}", path.display());
+    let mut v3 = example.clone();
+    v3.program = example.program.replace(".v0.so", ".v3.so");
+    vec![example, v3]
 }
 
 fn outcome(name: &str) -> Outcome {
@@ -124,7 +128,7 @@ fn asm() {
         registers: true,
         trace: false,
     };
-    let cases: [(&str, [u64; 9]); 9] = [
+    let cases: [(&str, [u64; 9]); 10] = [
         (
             "mov",
             [
@@ -216,10 +220,25 @@ fn asm() {
             [0x66, 0x66, 0x6666, 0x6666, 0x6666, 0x6666, 0x66, 1, 6],
         ),
         ("loop", [10, 55, 3628800, 7, 12, 3, 4, 28, 18]),
+        // Only v3. Same layout as jump.
+        (
+            "jmp32",
+            [
+                0x66,
+                0x66,
+                0x6666,
+                0x6666,
+                0x6666,
+                0x6666,
+                0x66,
+                0x300000000,
+                0x300000000,
+            ],
+        ),
     ];
     for (name, expected) in cases {
         let path = example(&format!("asm/{name}"));
-        for e in v0_and_v3(&path) {
+        for e in versions(&path) {
             let o = run(&e, path.parent().unwrap(), options).unwrap();
             assert_eq!(o.status, Status::Success, "{}: {:?}", e.program, o.error);
             let registers = o.registers.unwrap().unwrap();
@@ -244,7 +263,10 @@ fn input_accounts_unchanged_on_failure() {
 #[test]
 fn v0_and_v3_agree() {
     for path in all_examples() {
-        let [v0, v3] = v0_and_v3(&path);
+        // A v3-only example has nothing to agree with.
+        let Ok([v0, v3]) = <[Example; 2]>::try_from(versions(&path)) else {
+            continue;
+        };
         let dir = path.parent().unwrap();
         let normalize = |mut o: Outcome| {
             o.compute_units = 0;
