@@ -18,13 +18,23 @@ fn load(path: &Path) -> Example {
 /// an example on `.v3.so` is a v3-only program (jmp32) and runs as is.
 fn versions(path: &Path) -> Vec<Example> {
     let example = load(path);
-    if example.program.ends_with(".v3.so") {
+    if is_v3_only(&example) {
+        let v0 = path
+            .parent()
+            .unwrap()
+            .join(example.program.replace(".v3.so", ".v0.so"));
+        // Otherwise a two-version program pointed at .v3.so by mistake would silently lose its v0 checks.
+        assert!(!v0.exists(), "{}: есть {}", path.display(), v0.display());
         return vec![example];
     }
     assert!(example.program.ends_with(".v0.so"), "{}", path.display());
     let mut v3 = example.clone();
     v3.program = example.program.replace(".v0.so", ".v3.so");
     vec![example, v3]
+}
+
+fn is_v3_only(example: &Example) -> bool {
+    example.program.ends_with(".v3.so")
 }
 
 fn outcome(name: &str) -> Outcome {
@@ -45,7 +55,7 @@ fn all_examples() -> Vec<PathBuf> {
             }
         }
     }
-    assert!(paths.len() >= 24);
+    assert!(paths.len() >= 27);
     paths.sort();
     paths
 }
@@ -121,7 +131,8 @@ fn anchor_basic() {
     assert_failure("anchor-basic/increment-wrong-authority", "Custom(2001)");
 }
 
-/// Final r1–r9 of the asm programs on v0 and v3; expected values computed from the `docs/ir.md` semantics.
+/// Final r1–r9 of the asm programs on every version they are built for (`versions`); expected values computed
+/// from the `docs/ir.md` semantics.
 #[test]
 fn asm() {
     let options = Options {
@@ -264,9 +275,10 @@ fn input_accounts_unchanged_on_failure() {
 fn v0_and_v3_agree() {
     for path in all_examples() {
         // A v3-only example has nothing to agree with.
-        let Ok([v0, v3]) = <[Example; 2]>::try_from(versions(&path)) else {
+        if is_v3_only(&load(&path)) {
             continue;
-        };
+        }
+        let [v0, v3] = <[Example; 2]>::try_from(versions(&path)).unwrap();
         let dir = path.parent().unwrap();
         let normalize = |mut o: Outcome| {
             o.compute_units = 0;

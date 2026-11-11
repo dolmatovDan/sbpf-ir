@@ -1,7 +1,8 @@
 # All 64-bit conditional jumps (jeq jne jgt jge jlt jle jsgt jsge jslt jsle jset), imm and reg forms,
 # each taken once and not taken once. Operands are r8 (and r9 for reg); the imm is sign-extended to 64 bits.
-# Cases are picked so that a wrong reading (other signedness, zero-extended imm) gives the other outcome.
-# Each case sets its own bit in r1-r7: the lower bit if the jump is not taken, the higher bit if it is.
+# Where possible, cases are picked so that a wrong reading (other signedness, zero-extended imm) gives the
+# other outcome; for jeq, jne and jset with a register no such reading exists.
+# Each case sets its own bit in r1–r7: the lower bit if the jump is not taken, the higher bit if it is.
 # The not-taken side skips the taken one with ja, so blocks are entered both by a jump and by falling through.
 # The LLVM SBF assembler has no jset mnemonic, so jset is written as bytes (opcode 0x45 / 0x4d, off +2).
 .globl entrypoint

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the test programs for each sBPF version in ARCHES
+# Builds the test programs for each sBPF version in ARCHES (programs in ASM_V3 only for v3)
 # and places them in bin/<name>.<arch>.so. The asm-<name> programs are built
 # from asm/<name>.s directly with clang and ld.lld from platform-tools, without cargo build-sbf.
 #
@@ -17,12 +17,13 @@ ASM=(mov alu64 shift64 alu32 shift32 divmod endian jump loop)
 ASM_V3=(jmp32)
 PROGRAMS=("$@")
 if [ ${#PROGRAMS[@]} -eq 0 ]; then
-    PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}" "${ASM_V3[@]/#/asm-}")
+    # ${A[@]+...}: an empty array under set -u is an error in bash before 4.4 (macOS ships 3.2).
+    PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}" ${ASM_V3[@]+"${ASM_V3[@]/#/asm-}"})
 fi
 
 v3_only() {
     local name
-    for name in "${ASM_V3[@]}"; do
+    for name in ${ASM_V3[@]+"${ASM_V3[@]}"}; do
         [ "$1" = "asm-$name" ] && return 0
     done
     return 1

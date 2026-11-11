@@ -85,8 +85,8 @@ fn invariants() {
 }
 
 /// Asm examples for the machine: one function without memory or calls; exits are only jumps and `exit`;
-/// a register is read only after being written (in `pc` order: programs write registers before the first jump);
-/// all of r1–r9 are written in the end. Programs with jumps contain a branch, `ja` and a fall-through into a block.
+/// a register is read only where it is written on every path from the entry; r1–r9 are written at every `exit`.
+/// A program without jumps is one block; one with jumps contains a branch, `ja` and a fall-through into a block.
 #[test]
 fn asm_programs_shape() {
     let mut count = 0;
@@ -100,11 +100,15 @@ fn asm_programs_shape() {
         let [function] = module.functions.as_slice() else {
             panic!("{name}: функций {}", module.functions.len());
         };
-        let mut blocks: Vec<_> = function.blocks.iter().collect();
-        blocks.sort_by_key(|b| b.start);
-        let mut written = [false; 11];
-        let (mut branches, mut jas, mut fallthroughs) = (0, 0, 0);
-        for block in blocks {
+        let blocks: BTreeMap<_, _> = function.blocks.iter().map(|b| (b.start, b)).collect();
+        // Registers written on every path into a block: a forward analysis to a fixpoint. An unvisited block
+        // assumes everything is written, so states only shrink, and every block is checked again with its final
+        // state; checks on an earlier, larger state cannot fail where the final one passes.
+        let mut written_in = BTreeMap::from([(function.entry, [false; 11])]);
+        let mut work = vec![function.entry];
+        while let Some(start) = work.pop() {
+            let block = blocks[&start];
+            let mut written = written_in[&start];
             for stmt in &block.statements {
                 match stmt {
                     Stmt::Assign { dst, value, .. } => {
@@ -121,34 +125,48 @@ fn asm_programs_shape() {
                     other => panic!("{name}: {other:?}"),
                 }
             }
-            match &block.exit {
-                Exit::Return { .. } => {}
-                Exit::Branch { cond, .. } => {
-                    assert_reads_written(cond, &written, &name);
-                    branches += 1;
+            let targets = match &block.exit {
+                Exit::Return { .. } => {
+                    assert!(
+                        written[1..10].iter().all(|&w| w),
+                        "{name}: на exit в блоке {start} записаны не все r1–r9"
+                    );
+                    vec![]
                 }
-                Exit::Next { pc: Some(_), .. } => jas += 1,
-                Exit::Next { pc: None, .. } => fallthroughs += 1,
+                Exit::Branch {
+                    cond, then, r#else, ..
+                } => {
+                    assert_reads_written(cond, &written, &name);
+                    vec![*then, *r#else]
+                }
+                Exit::Next { target, .. } => vec![*target],
                 other => panic!("{name}: {other:?}"),
+            };
+            for target in targets {
+                let merged = match written_in.get(&target) {
+                    None => written,
+                    Some(old) => std::array::from_fn(|r| old[r] && written[r]),
+                };
+                if written_in.get(&target) != Some(&merged) {
+                    written_in.insert(target, merged);
+                    work.push(target);
+                }
             }
         }
-        assert!(
-            written[1..10].iter().all(|&w| w),
-            "{name}: записаны не все r1–r9"
-        );
-        if ["asm-jump.", "asm-loop.", "asm-jmp32."]
-            .iter()
-            .any(|p| name.starts_with(p))
-        {
+        let exits = || function.blocks.iter().map(|b| &b.exit);
+        let branches = exits().filter(|e| matches!(e, Exit::Branch { .. })).count();
+        let jas = exits()
+            .filter(|e| matches!(e, Exit::Next { pc: Some(_), .. }))
+            .count();
+        let fallthroughs = exits()
+            .filter(|e| matches!(e, Exit::Next { pc: None, .. }))
+            .count();
+        if branches + jas + fallthroughs == 0 {
+            assert_eq!(function.blocks.len(), 1, "{name}: ожидался один блок");
+        } else {
             assert!(
                 branches > 0 && jas > 0 && fallthroughs > 0,
                 "{name}: branch {branches}, ja {jas}, провалов {fallthroughs}"
-            );
-        } else {
-            assert_eq!(
-                (branches, jas, fallthroughs),
-                (0, 0, 0),
-                "{name}: ожидался один блок"
             );
         }
     }

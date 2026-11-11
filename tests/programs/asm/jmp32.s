@@ -1,7 +1,8 @@
 # All jmp32 conditional jumps (only in sBPF v3), imm and reg forms, each taken once and not taken once.
-# jmp32 compares the low 32 bits of r8 (and r9 for reg) with the low 32 bits of the imm. Cases are picked
-# so that a 64-bit compare or the other signedness gives the other outcome.
-# Each case sets its own bit in r1-r7: the lower bit if the jump is not taken, the higher bit if it is.
+# jmp32 compares the low 32 bits of r8 (and r9 for reg) with the low 32 bits of the imm. Where possible,
+# cases are picked so that a 64-bit compare or the other signedness gives the other outcome; the paired case
+# of an op covers the rest.
+# Each case sets its own bit in r1–r7: the lower bit if the jump is not taken, the higher bit if it is.
 # The LLVM SBF assembler has no jset mnemonic, so jset32 is written as bytes (opcode 0x46 / 0x4e, off +2).
 # Built only for v3: the v0 verifier rejects the jmp32 class.
 .globl entrypoint
