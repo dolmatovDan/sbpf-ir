@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 TOOLS_VERSION="${TOOLS_VERSION:-v1.57}"
 PLATFORM_TOOLS="${PLATFORM_TOOLS:-$HOME/.cache/solana/$TOOLS_VERSION/platform-tools}"
 ARCHES=(v0 v3)
-ASM=(mov alu64 shift64 alu32 shift32 divmod endian)
+ASM=(mov alu64 shift64 alu32 shift32 divmod endian jump loop)
 PROGRAMS=("$@")
 if [ ${#PROGRAMS[@]} -eq 0 ]; then
     PROGRAMS=(native-basic native-cpi anchor-basic "${ASM[@]/#/asm-}")

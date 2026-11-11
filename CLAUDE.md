@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `tests/examples/<контракт>/*.json` — примеры для раннера, генерирует `tests/examples/gen.py`; все указывают на `.v0.so`, тесты исполняют их и на `.v3.so`.
 - `tests/programs/` — **отдельный** Cargo-воркспейс (исключён из основного): Rust-контракты собираются только через `cargo build-sbf`, не обычным `cargo build`.
   - `native-basic`, `native-cpi`, `anchor-basic` — исходники тестовых контрактов; собранные `.so` лежат в git в `bin/<имя>.<v0|v3>.so`.
-  - `asm/<имя>.s` — программы на ассемблере sBPF для первой версии символьной машины: только регистры и арифметика, один блок, регистр читается только после записи, итог в r1–r9 (проверяет `asm_programs_are_straight_line`). `build.sh` собирает их как `asm-<имя>` через clang и ld.lld из platform-tools, линкер-скрипт берётся из target-spec rustc. Мнемоник `le*` в ассемблере LLVM нет — они записаны байтами.
+  - `asm/<имя>.s` — программы на ассемблере sBPF для символьной машины: регистры, арифметика и переходы, без памяти и вызовов; одна функция, регистр читается только после записи (в порядке `pc`: регистры пишутся до первого перехода), итог в r1–r9 (проверяет `asm_programs_shape`). Программы с переходами (`jump`, `loop`) содержат `branch`, `ja` и провал в блок, остальные — один блок. `build.sh` собирает их как `asm-<имя>` через clang и ld.lld из platform-tools, линкер-скрипт берётся из target-spec rustc. Мнемоник `le*` и `jset` в ассемблере LLVM нет — они записаны байтами. Константы `lddw`, совпадающие с адресом кода (`text_vaddr + 8·pc`, например `0x100000000` в v3), попадут в `address_taken`, а у asm-программ его быть не должно (`address_taken_follow_terminators`).
   - `mainnet/` — реальные контракты (p-token, ATA, Marinade), все sBPF v0; хеши в `MANIFEST.md`.
 
 ## Неочевидные решения
@@ -63,7 +63,7 @@ tests/programs/build.sh [программа ...]           # пересобра�
 tests/programs/mainnet/dump.sh                    # перекачать контракты из мейннета (RPC_URL)
 ```
 
-Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 20 файлов в `bin/` ((3 контракта + 7 asm) × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новая asm-программа — ещё `ASM` в `build.sh`, счётчик в `asm_programs_are_straight_line`, список в `gen.py` и ожидаемые регистры в тесте `asm` (`crates/sbpf-run/tests/run.rs`). Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
+Тесты читают `.so` из `tests/programs/{bin,mainnet}` относительно `CARGO_MANIFEST_DIR` (помощники в `crates/sbpf-lift/tests/common/mod.rs`). `load_smoke` ожидает ровно 24 файла в `bin/` ((3 контракта + 9 asm) × v0/v3) — при добавлении тестового контракта обновить этот счётчик и список `PROGRAMS` в `build.sh`. Новая asm-программа — ещё `ASM` в `build.sh`, счётчик в `asm_programs_shape`, список в `gen.py` и ожидаемые регистры в тесте `asm` (`crates/sbpf-run/tests/run.rs`). Новый контракт из мейннета — добавить в `programs.txt` и в `MAINNET` в `tests/common/mod.rs`.
 
 CI (`.github/workflows/ci.yml`) собирает с `RUSTFLAGS=-D warnings` и запускает `cargo fmt --all --check`, `cargo clippy --all-targets --locked`, `cargo test --locked`: любое предупреждение или неформатированный код валит сборку.
 

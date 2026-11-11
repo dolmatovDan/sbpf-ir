@@ -124,7 +124,7 @@ fn asm() {
         registers: true,
         trace: false,
     };
-    let cases: [(&str, [u64; 9]); 7] = [
+    let cases: [(&str, [u64; 9]); 9] = [
         (
             "mov",
             [
@@ -210,6 +210,12 @@ fn asm() {
                 0x3412000000000000,
             ],
         ),
+        // Bit masks of the jump outcomes (see the comment in jump.s), then the last operands.
+        (
+            "jump",
+            [0x66, 0x66, 0x6666, 0x6666, 0x6666, 0x6666, 0x66, 1, 6],
+        ),
+        ("loop", [10, 55, 3628800, 7, 12, 3, 4, 28, 18]),
     ];
     for (name, expected) in cases {
         let path = example(&format!("asm/{name}"));
