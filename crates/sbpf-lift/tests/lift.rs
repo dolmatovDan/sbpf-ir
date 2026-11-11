@@ -84,10 +84,11 @@ fn invariants() {
     }
 }
 
-/// Asm examples for the first version of the machine: one block without memory or calls,
-/// a register is read only after being written, and all of r1–r9 are written in the end.
+/// Asm examples for the machine: one function without memory or calls; exits are only jumps and `exit`;
+/// a register is read only where it is written on every path from the entry; r1–r9 are written at every `exit`.
+/// A program without jumps is one block; one with jumps contains a branch, `ja` and a fall-through into a block.
 #[test]
-fn asm_programs_are_straight_line() {
+fn asm_programs_shape() {
     let mut count = 0;
     for path in common::own_programs() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -99,31 +100,80 @@ fn asm_programs_are_straight_line() {
         let [function] = module.functions.as_slice() else {
             panic!("{name}: функций {}", module.functions.len());
         };
-        let [block] = function.blocks.as_slice() else {
-            panic!("{name}: блоков {}", function.blocks.len());
-        };
-        assert!(matches!(block.exit, Exit::Return { .. }), "{name}");
-        let mut written = [false; 11];
-        for stmt in &block.statements {
-            match stmt {
-                Stmt::Assign { dst, value, .. } => {
-                    assert_reads_written(value, &written, &name);
-                    written[*dst as usize] = true;
+        let blocks: BTreeMap<_, _> = function.blocks.iter().map(|b| (b.start, b)).collect();
+        // Registers written on every path into a block: a forward analysis to a fixpoint. An unvisited block
+        // assumes everything is written, so states only shrink, and every block is checked again with its final
+        // state; checks on an earlier, larger state cannot fail where the final one passes.
+        let mut written_in = BTreeMap::from([(function.entry, [false; 11])]);
+        let mut work = vec![function.entry];
+        while let Some(start) = work.pop() {
+            let block = blocks[&start];
+            let mut written = written_in[&start];
+            for stmt in &block.statements {
+                match stmt {
+                    Stmt::Assign { dst, value, .. } => {
+                        assert_reads_written(value, &written, &name);
+                        written[*dst as usize] = true;
+                    }
+                    Stmt::Check {
+                        cond,
+                        error: Fault::DivideByZero,
+                        ..
+                    } if name.starts_with("asm-divmod.") => {
+                        assert_reads_written(cond, &written, &name)
+                    }
+                    other => panic!("{name}: {other:?}"),
                 }
-                Stmt::Check {
-                    cond,
-                    error: Fault::DivideByZero,
-                    ..
-                } if name.starts_with("asm-divmod.") => assert_reads_written(cond, &written, &name),
+            }
+            let targets = match &block.exit {
+                Exit::Return { .. } => {
+                    assert!(
+                        written[1..10].iter().all(|&w| w),
+                        "{name}: на exit в блоке {start} записаны не все r1–r9"
+                    );
+                    vec![]
+                }
+                Exit::Branch {
+                    cond, then, r#else, ..
+                } => {
+                    assert_reads_written(cond, &written, &name);
+                    vec![*then, *r#else]
+                }
+                Exit::Next { target, .. } => vec![*target],
                 other => panic!("{name}: {other:?}"),
+            };
+            for target in targets {
+                let merged = match written_in.get(&target) {
+                    None => written,
+                    Some(old) => std::array::from_fn(|r| old[r] && written[r]),
+                };
+                if written_in.get(&target) != Some(&merged) {
+                    written_in.insert(target, merged);
+                    work.push(target);
+                }
             }
         }
-        assert!(
-            written[1..10].iter().all(|&w| w),
-            "{name}: записаны не все r1–r9"
-        );
+        let exits = || function.blocks.iter().map(|b| &b.exit);
+        let branches = exits().filter(|e| matches!(e, Exit::Branch { .. })).count();
+        let jas = exits()
+            .filter(|e| matches!(e, Exit::Next { pc: Some(_), .. }))
+            .count();
+        let fallthroughs = exits()
+            .filter(|e| matches!(e, Exit::Next { pc: None, .. }))
+            .count();
+        if branches + jas + fallthroughs == 0 {
+            assert_eq!(function.blocks.len(), 1, "{name}: ожидался один блок");
+        } else {
+            assert!(
+                branches > 0 && jas > 0 && fallthroughs > 0,
+                "{name}: branch {branches}, ja {jas}, провалов {fallthroughs}"
+            );
+        }
     }
-    assert_eq!(count, 14, "ожидалось 7 asm-программ × (v0, v3)");
+    assert_eq!(
+        count, 19,
+        "ожидалось 9 asm-программ × (v0, v3) + 1 только под v3"
+    );
 }
 
 fn assert_reads_written(expr: &Expr, written: &[bool; 11], name: &str) {

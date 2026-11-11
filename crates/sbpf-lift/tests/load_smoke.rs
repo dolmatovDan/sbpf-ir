@@ -21,7 +21,10 @@ fn own_programs_load_with_expected_version() {
         assert_eq!(load(&path).version(), expected, "{}", path.display());
         count += 1;
     }
-    assert_eq!(count, 20, "ожидалось (3 контракта + 7 asm) × (v0, v3)");
+    assert_eq!(
+        count, 25,
+        "ожидалось (3 контракта + 9 asm) × (v0, v3) + 1 asm только под v3"
+    );
 }
 
 #[test]

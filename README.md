@@ -102,7 +102,7 @@ sbpf-lift run tests/examples/native-basic/alu64.json --trace       # + реги�
 
 Ошибка контракта — `"status": "failure"` и `"error"` (например `tests/examples/native-basic/div-by-zero.json` → `ArithmeticOverflow`). Готовые примеры с аккаунтами, CPI и Anchor — в [`tests/examples/`](tests/examples), полный формат входа и выхода — [`docs/runner.md`](docs/runner.md).
 
-Примеры для первой версии символьной машины лежат в [`tests/examples/asm/`](tests/examples/asm). Это программы на ассемблере ([`tests/programs/asm/`](tests/programs/asm)) без памяти, вызовов и ветвлений; каждый регистр читается только после записи. Итог — значения r1–r9, их возвращает `--registers`:
+Примеры для символьной машины лежат в [`tests/examples/asm/`](tests/examples/asm). Это программы на ассемблере ([`tests/programs/asm/`](tests/programs/asm)) без памяти и вызовов: арифметика в одном блоке (`mov`, `alu64`, `alu32`, `shift64`, `shift32`, `divmod`, `endian`) и переходы (`jump` — все условные переходы, `loop` — циклы, `jmp32` — 32-битные переходы, только под v3); каждый регистр читается только после записи. Итог — значения r1–r9, их возвращает `--registers`:
 
 ```sh
 sbpf-lift run tests/examples/asm/alu32.json --registers
@@ -127,8 +127,8 @@ sbpf-ir/
         ├── native-basic/   # нативный Rust: ветвления, ALU 32/64, деление, циклы
         ├── native-cpi/     # нативный Rust: invoke / invoke_signed в System Program
         ├── anchor-basic/   # Anchor: счётчик с constraints
-        ├── asm/            # ассемблер sBPF: только регистры и арифметика (для первой версии машины)
-        ├── build.sh        # сборка под v0 и v3 → bin/<имя>.<v0|v3>.so (asm → bin/asm-<имя>.…)
+        ├── asm/            # ассемблер sBPF: регистры, арифметика и переходы, без памяти и вызовов (для символьной машины)
+        ├── build.sh        # сборка под v0 и v3 → bin/<имя>.<v0|v3>.so (asm → bin/asm-<имя>.…, jmp32 только v3)
         ├── bin/            # собранные .so (в git)
         └── mainnet/        # контракты из мейннета: dump.sh, programs.txt, MANIFEST.md
 ```
