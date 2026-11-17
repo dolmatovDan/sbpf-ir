@@ -132,7 +132,8 @@ fn anchor_basic() {
 }
 
 /// Final r1–r9 of the asm programs on every version they are built for (`versions`); expected values computed
-/// from the `docs/ir.md` semantics.
+/// from the `docs/ir.md` semantics and, for `memory`, from the input layout of the agave serializer and the
+/// zeroed heap.
 #[test]
 fn asm() {
     let options = Options {

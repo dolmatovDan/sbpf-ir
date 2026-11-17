@@ -4,7 +4,8 @@
 # The example passes instruction_data 11 22 33 44 55 66 77 88 99 (9 bytes); r0 collects the reads that must be 0.
 .globl entrypoint
 entrypoint:
-# header: account count (0) into r0, instruction data length into r1 (last, r1 is the base until then)
+# header and instruction data: account count (0) into r0, instruction data into r7 and r8, the program id
+# after it into r9, instruction data length into r1 (last, r1 is the base until then)
   ldxdw r0, [r1+0]
   ldxdw r7, [r2+0]
   ldxb r8, [r2+8]
