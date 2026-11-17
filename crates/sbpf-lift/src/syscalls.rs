@@ -107,11 +107,15 @@ fn not_executable(
 fn no_codegen(_jit: &mut JitCompiler<NoExec>) {}
 
 /// Unlike the validator on deployment, `reject_broken_elfs` is off: v0 with an unknown
-/// syscall loads. Symbol labels are enabled for function names.
+/// syscall loads. Symbol labels are enabled for function names. `optimize_rodata` is off as in
+/// agave (`solana-syscalls` `create_program_runtime_environment`, `Config::default()` has it
+/// on): with it on, the v0 read-only region would start at the first section instead of the
+/// slot start `0x1_0000_0000`, and the memory model would see a different region than the VM.
 pub(crate) fn loader() -> Arc<BuiltinProgram<NoExec>> {
     let config = Config {
         enabled_sbpf_versions: SBPFVersion::V0..=SBPFVersion::V3,
         enable_symbol_and_section_labels: true,
+        optimize_rodata: false,
         ..Config::default()
     };
     let mut loader = BuiltinProgram::new_loader(config);

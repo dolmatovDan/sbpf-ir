@@ -22,8 +22,8 @@ fn own_programs_load_with_expected_version() {
         count += 1;
     }
     assert_eq!(
-        count, 25,
-        "ожидалось (3 контракта + 9 asm) × (v0, v3) + 1 asm только под v3"
+        count, 27,
+        "ожидалось (3 контракта + 10 asm) × (v0, v3) + 1 asm только под v3"
     );
 }
 
