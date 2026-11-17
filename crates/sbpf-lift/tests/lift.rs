@@ -207,6 +207,10 @@ fn header() {
     let (_, v3, _) = lift_file(&common::programs_dir().join("bin/native-basic.v3.so"));
     assert_eq!((v0.format_version, v0.sbpf_version), (1, 0));
     assert_eq!((v3.format_version, v3.sbpf_version), (1, 3));
+    // The region starts at the slot start, as agave loads with optimize_rodata = false (with the solana-sbpf
+    // default it would start at the first section); the symbolic machine relies on this.
+    assert_eq!(v0.ro_region.vaddr, 0x1_0000_0000);
+    assert_eq!(v3.ro_region.vaddr, 0);
     // In v0 the code is part of the read-only region, in v3 it is not.
     let contains_text = |m: &Module| {
         (m.ro_region.vaddr..m.ro_region.vaddr + m.ro_region.data.len() as u64)
