@@ -3,9 +3,8 @@
 Keys are base58 strings of the form Prefix111…; vault is the PDA [b"vault"] of program Cpi111…
 
 asm/: programs from tests/programs/asm for the symbolic machine:
-no calls (jumps, loops and memory are allowed), a register is read only after being written (r1, r2 and r10 are
-written by the VM),
-results in r1–r9; no accounts, instruction data only where the program reads it (memory).
+no calls (jumps, loops and memory are allowed), a register is read only after being written (r1, r2 and r10
+are written by the VM), results in r1–r9; no accounts, instruction data only where the program reads it (memory).
 An example on .v3.so is for a v3-only program (jmp32).
 """
 
