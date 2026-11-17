@@ -84,9 +84,10 @@ fn invariants() {
     }
 }
 
-/// Asm examples for the machine: one function without memory or calls; exits are only jumps and `exit`;
-/// a register is read only where it is written on every path from the entry; r1–r9 are written at every `exit`.
-/// A program without jumps is one block; one with jumps contains a branch, `ja` and a fall-through into a block.
+/// Asm examples for the machine: one function without calls; exits are only jumps and `exit`; a register is
+/// read only where it is written on every path from the entry (r1, r2 and r10 are written by the VM); r1–r9 are
+/// written at every `exit`. A program without jumps is one block; one with jumps contains a branch, `ja` and a
+/// fall-through into a block.
 #[test]
 fn asm_programs_shape() {
     let mut count = 0;
@@ -104,7 +105,11 @@ fn asm_programs_shape() {
         // Registers written on every path into a block: a forward analysis to a fixpoint. An unvisited block
         // assumes everything is written, so states only shrink, and every block is checked again with its final
         // state; checks on an earlier, larger state cannot fail where the final one passes.
-        let mut written_in = BTreeMap::from([(function.entry, [false; 11])]);
+        let mut at_entry = [false; 11];
+        for r in [1, 2, 10] {
+            at_entry[r] = true;
+        }
+        let mut written_in = BTreeMap::from([(function.entry, at_entry)]);
         let mut work = vec![function.entry];
         while let Some(start) = work.pop() {
             let block = blocks[&start];
@@ -114,6 +119,14 @@ fn asm_programs_shape() {
                     Stmt::Assign { dst, value, .. } => {
                         assert_reads_written(value, &written, &name);
                         written[*dst as usize] = true;
+                    }
+                    Stmt::Load { dst, addr, .. } => {
+                        assert_reads_written(addr, &written, &name);
+                        written[*dst as usize] = true;
+                    }
+                    Stmt::Store { addr, value, .. } => {
+                        assert_reads_written(addr, &written, &name);
+                        assert_reads_written(value, &written, &name);
                     }
                     Stmt::Check {
                         cond,
@@ -171,8 +184,8 @@ fn asm_programs_shape() {
         }
     }
     assert_eq!(
-        count, 19,
-        "ожидалось 9 asm-программ × (v0, v3) + 1 только под v3"
+        count, 21,
+        "ожидалось 10 asm-программ × (v0, v3) + 1 только под v3"
     );
 }
 

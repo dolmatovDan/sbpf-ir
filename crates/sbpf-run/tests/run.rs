@@ -55,7 +55,7 @@ fn all_examples() -> Vec<PathBuf> {
             }
         }
     }
-    assert!(paths.len() >= 27);
+    assert!(paths.len() >= 28);
     paths.sort();
     paths
 }
@@ -139,7 +139,7 @@ fn asm() {
         registers: true,
         trace: false,
     };
-    let cases: [(&str, [u64; 9]); 10] = [
+    let cases: [(&str, [u64; 9]); 11] = [
         (
             "mov",
             [
@@ -231,6 +231,21 @@ fn asm() {
             [0x66, 0x66, 0x6666, 0x6666, 0x6666, 0x6666, 0x66, 1, 6],
         ),
         ("loop", [10, 55, 3628800, 7, 12, 3, 4, 28, 18]),
+        // Instruction data length, heap word, stack words, instruction data and the program id after it.
+        (
+            "memory",
+            [
+                9,
+                0xcafe,
+                0x334455667788007f,
+                0x7788,
+                0x33445566,
+                0x1122abcd55667788,
+                0x8877665544332211,
+                0x99,
+                0xf35224dbc79e8702,
+            ],
+        ),
         // Only v3. Same layout as jump.
         (
             "jmp32",

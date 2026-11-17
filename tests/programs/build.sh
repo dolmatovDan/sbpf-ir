@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 TOOLS_VERSION="${TOOLS_VERSION:-v1.57}"
 PLATFORM_TOOLS="${PLATFORM_TOOLS:-$HOME/.cache/solana/$TOOLS_VERSION/platform-tools}"
 ARCHES=(v0 v3)
-ASM=(mov alu64 shift64 alu32 shift32 divmod endian jump loop)
+ASM=(mov alu64 shift64 alu32 shift32 divmod endian jump loop memory)
 # Asm programs built only for v3: they use instructions the v0 verifier rejects (jmp32).
 ASM_V3=(jmp32)
 PROGRAMS=("$@")
