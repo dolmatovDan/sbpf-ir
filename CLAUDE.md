@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Изменение `docs/ir.md` — изменение контракта с Kotlin и согласуется с научным руководителем; найденное расхождение с `solana-sbpf` не исправлять молча.
 - Раннер повторяет валидатор, а не умолчания Mollusk: лимит CU 200 000, нарушение ренты — `failure` (`InsufficientFundsForRent`) с исходными аккаунтами, а не паника Mollusk. Трассировку регистров Mollusk включает только в конструкторе `new_debuggable`, который ищет ELF по имени — ему передаётся абсолютный путь без `.so`. Набор фич — `all_enabled`, не мейннет.
 - `docs/runner.md`, как и `docs/ir.md`, — контракт с Kotlin.
-- Загрузчик лифтера (`syscalls.rs`, `loader`) повторяет `Config` agave там, где это меняет видимую программе картину: `optimize_rodata: false` (в v0 `ro_region` начинается с `0x1_0000_0000`, нули до первой секции, как у валидатора; с умолчанием `solana-sbpf` регион начинался бы с первой секции).
+- Загрузчик лифтера (`syscalls.rs`, `loader`) повторяет `Config` agave там, где это меняет видимую программе картину: `optimize_rodata: false` (в v0 `ro_region` начинается с `0x1_0000_0000`, нули везде, кроме ro-секций (`.text`, `.rodata`, `.data.rel.ro`, `.eh_frame`) по их адресам ELF, как у валидатора; с умолчанием `solana-sbpf` регион начинался бы с первой секции).
 
 ## Команды
 
